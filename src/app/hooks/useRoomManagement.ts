@@ -77,10 +77,15 @@ export function useRoomManagement() {
   // =========================
   // 🧹 HOUSEKEEPING
   // =========================
-  const startCleaning = async (taskId: number, staffId: string) => {
+  const startCleaning = async (taskId: number) => {
     try {
-      await RoomService.startCleaning(taskId, staffId);
-      await fetchAll();
+      const updatedTask = await RoomService.startCleaning(taskId);
+
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskId ? { ...t, ...updatedTask, status: "in_progress" } : t
+        )
+      );
     } catch (err) {
       console.error(err);
     }

@@ -2,9 +2,6 @@ import { supabase } from "@/lib/supabase";
 
 export const RoomService = {
 
-  // =========================================================
-  // GET ROOMS
-  // =========================================================
   async getRooms() {
     const { data, error } = await supabase
       .from("rooms")
@@ -32,9 +29,6 @@ export const RoomService = {
     return data ?? [];
   },
 
-  // =========================================================
-  // GET HOUSEKEEPING TASKS
-  // =========================================================
   async getHousekeepingTasks() {
     const { data, error } = await supabase
       .from("housekeeping_tasks")
@@ -57,9 +51,6 @@ export const RoomService = {
     return data ?? [];
   },
 
-  // =========================================================
-  // GET CURRENT USER (HOUSEKEEPER)
-  // =========================================================
   async getCurrentUserId(): Promise<string> {
     const { data, error } = await supabase.auth.getUser();
 
@@ -70,9 +61,6 @@ export const RoomService = {
     return data.user.id;
   },
 
-  // =========================================================
-  // START CLEANING (AUTO ASSIGN STAFF)
-  // =========================================================
   async startCleaning(taskId: number) {
 
     const staffId = await this.getCurrentUserId();
@@ -108,9 +96,6 @@ export const RoomService = {
     return task;
   },
 
-  // =========================================================
-  // GET SINGLE TASK
-  // =========================================================
   async getTaskById(taskId: number) {
     const { data, error } = await supabase
       .from("housekeeping_tasks")
@@ -132,9 +117,6 @@ export const RoomService = {
     return data;
   },
 
-  // =========================================================
-  // UPDATE CHECKLIST ITEM
-  // =========================================================
   async updateChecklistItem(
     itemId: number,
     isDone: boolean,
@@ -154,9 +136,6 @@ export const RoomService = {
     }
   },
 
-  // =========================================================
-  // COMPLETE CLEANING
-  // =========================================================
   async completeCleaning(taskId: number, note?: string) {
 
     const { data: task, error: fetchError } = await supabase
@@ -199,9 +178,6 @@ export const RoomService = {
     return true;
   },
 
-  // =========================================================
-  // MARK ROOM AVAILABLE
-  // =========================================================
   async markRoomAvailable(roomId: number) {
     const { error } = await supabase
       .from("rooms")
@@ -214,37 +190,30 @@ export const RoomService = {
     }
   },
 
-  // =========================================================
-  // ROOM CRUD
-  // =========================================================
   async createRoom(payload: any) {
+    const { id, ...cleanPayload } = payload;
+
     const { data, error } = await supabase
       .from("rooms")
-      .insert(payload)
+      .insert(cleanPayload)
       .select()
       .single();
 
-    if (error) {
-      console.error("[createRoom]", error);
-      throw error;
-    }
-
+    if (error) throw error;
     return data;
   },
 
   async updateRoom(id: number, payload: any) {
+    const { id: _, ...cleanPayload } = payload;
+
     const { data, error } = await supabase
       .from("rooms")
-      .update(payload)
+      .update(cleanPayload)
       .eq("id", id)
       .select()
       .single();
 
-    if (error) {
-      console.error("[updateRoom]", error);
-      throw error;
-    }
-
+    if (error) throw error;
     return data;
   },
 
@@ -260,9 +229,6 @@ export const RoomService = {
     }
   },
 
-  // =========================================================
-  // ROOM TYPES
-  // =========================================================
   async getRoomTypes() {
     const { data, error } = await supabase
       .from("room_types")
@@ -284,9 +250,6 @@ export const RoomService = {
     return data ?? [];
   },
 
-  // =========================================================
-  // AMENITIES
-  // =========================================================
   async getAmenities() {
     const { data, error } = await supabase
       .from("amenities")
@@ -299,5 +262,103 @@ export const RoomService = {
     }
 
     return data ?? [];
-  }
+  },
+
+  async getTemplateByRoomType(roomTypeId: number) {
+    const { data, error } = await supabase
+      .from("housekeeping_templates")
+      .select("*")
+      .eq("room_type_id", roomTypeId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("[getTemplateByRoomType]", error);
+      throw error;
+    }
+
+    return data;
+  },
+
+  async createTemplate(roomTypeId: number) {
+    const { data, error } = await supabase
+      .from("housekeeping_templates")
+      .insert({
+        room_type_id: roomTypeId,
+        name: "Auto Template",
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("[createTemplate]", error);
+      throw error;
+    }
+
+    return data;
+  },
+
+  async getTemplateItems(templateId: number) {
+    const { data, error } = await supabase
+      .from("housekeeping_template_items")
+      .select("*")
+      .eq("template_id", templateId)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("[getTemplateItems]", error);
+      throw error;
+    }
+
+    return data ?? [];
+  },
+
+  async addTemplateItem(templateId: number, payload: any) {
+    const { data, error } = await supabase
+      .from("housekeeping_template_items")
+      .insert({
+        template_id: templateId,
+        item_name: payload.item_name,
+        default_quantity: payload.default_quantity ?? 1,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("[addTemplateItem]", error);
+      throw error;
+    }
+
+    return data;
+  },
+
+  async deleteTemplateItem(itemId: number) {
+    const { error } = await supabase
+      .from("housekeeping_template_items")
+      .delete()
+      .eq("id", itemId);
+
+    if (error) {
+      console.error("[deleteTemplateItem]", error);
+      throw error;
+    }
+  },
+
+  async updateTemplateItem(itemId: number, payload: any) {
+    const { data, error } = await supabase
+      .from("housekeeping_template_items")
+      .update({
+        item_name: payload.item_name,
+        default_quantity: payload.default_quantity,
+      })
+      .eq("id", itemId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("[updateTemplateItem]", error);
+      throw error;
+    }
+
+    return data;
+  },
 };

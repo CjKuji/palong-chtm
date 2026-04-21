@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Sidebar from "@/app/components/Sidebar";
 import Topbar from "@/app/components/Topbar";
 import { useSidebar } from "@/app/context/SidebarContext";
 import { useRoomManagement } from "@/app/hooks/useRoomManagement";
 import HousekeepingModal from "@/app/components/CheckListModal";
+import TemplateModal from "@/app/components/TemplateModal";
+import RoomModal from "../components/RoomModal";
 
 const statusColors: any = {
   available: "bg-green-100 text-green-700",
@@ -21,6 +24,9 @@ const taskColors: any = {
 
 export default function RoomsInventory() {
   const { collapsed } = useSidebar();
+  const [openTemplateModal, setOpenTemplateModal] = useState(false);
+  const [openRoomModal, setOpenRoomModal] = useState(false);
+  const [selectedRoom, setSelectedRoom] = useState<any>(null);
 
   const {
     rooms,
@@ -33,23 +39,48 @@ export default function RoomsInventory() {
     updateChecklistItem,
     completeCleaning,
     setSelectedTask,
+
+    roomTypes,
+    createRoom,
+    updateRoom,
   } = useRoomManagement();
 
   return (
     <div className="flex min-h-screen bg-gray-100">
       <Sidebar activeMenu="rooms" />
 
-      <main className={`flex-1 ${collapsed ? "ml-20" : "ml-64"}`}>
+      <main className={`flex-1 ${collapsed ? "ml-20" : "ml-64"} pt-16`}>
         <Topbar />
 
         <div className="p-6 space-y-6">
 
           {/* HEADER */}
-          <div>
-            <h1 className="text-2xl font-bold">Room Management</h1>
-            <p className="text-gray-500 text-sm">
-              Manage rooms and housekeeping tasks
-            </p>
+          <div className="flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold">Room Management</h1>
+              <p className="text-gray-500 text-sm">
+                Manage rooms and housekeeping tasks
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={() => setOpenTemplateModal(true)}
+                className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+              >
+                Manage Checklist
+              </button>
+
+              <button
+                onClick={() => {
+                  setSelectedRoom(null);
+                  setOpenRoomModal(true);
+                }}
+                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700"
+              >
+                Add Room
+              </button>
+            </div>
           </div>
 
           {loading ? (
@@ -89,12 +120,24 @@ export default function RoomsInventory() {
                           {room.room_types?.name || "No type"}
                         </p>
 
-                        <button
-                          onClick={() => deleteRoom(room.id)}
-                          className="mt-4 text-sm text-red-500 hover:underline"
-                        >
-                          Delete
-                        </button>
+                        <div className="mt-4 flex gap-2">
+                          <button
+                            onClick={() => {
+                              setSelectedRoom(room);
+                              setOpenRoomModal(true);
+                            }}
+                            className="text-sm text-blue-500 hover:underline"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            onClick={() => deleteRoom(room.id)}
+                            className="text-sm text-red-500 hover:underline"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -163,7 +206,7 @@ export default function RoomsInventory() {
                             {task.status === "pending" && (
                               <button
                                 onClick={() =>
-                                  startCleaning(task.id, "staff-id")
+                                  startCleaning(task.id)
                                 }
                                 className="flex-1 px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
                               >
@@ -203,6 +246,30 @@ export default function RoomsInventory() {
         onClose={() => setSelectedTask(null)}
         onCheck={updateChecklistItem}
         onComplete={completeCleaning}
+      />
+
+      <TemplateModal
+        open={openTemplateModal}
+        onClose={() => setOpenTemplateModal(false)}
+      />
+
+      <RoomModal
+        open={openRoomModal}
+        room={selectedRoom}
+        roomTypes={roomTypes}
+        onClose={() => setOpenRoomModal(false)}
+        onSaved={(savedRoom: any) => {
+          setOpenRoomModal(false);
+          setSelectedRoom(null);
+
+          if (selectedRoom) {
+            const { id, ...payload } = savedRoom;
+            updateRoom(selectedRoom.id, payload);
+          } else {
+            const { id, ...payload } = savedRoom;
+            createRoom(payload);
+          }
+        }}
       />
     </div>
   );
