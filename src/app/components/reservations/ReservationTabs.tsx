@@ -1,5 +1,14 @@
-export default function ReservationTabs({ tab, setTab }: any) {
-  const tabs = [
+import { Booking } from "@/types/booking.types";
+
+type TabType = Booking["status"];
+
+interface Props {
+  tab: TabType;
+  setTab: (tab: TabType) => void;
+}
+
+export default function ReservationTabs({ tab, setTab }: Props) {
+  const tabs: { id: TabType; label: string }[] = [
     { id: "pending", label: "Pending" },
     { id: "approved", label: "Approved" },
     { id: "checked_in", label: "Checked In" },
@@ -9,9 +18,7 @@ export default function ReservationTabs({ tab, setTab }: any) {
 
   return (
     <div className="rounded-2xl border bg-white p-2 shadow-sm">
-
       <div className="flex gap-2 overflow-x-auto scrollbar-hide">
-
         {tabs.map((t) => {
           const active = tab === t.id;
 
@@ -33,7 +40,6 @@ export default function ReservationTabs({ tab, setTab }: any) {
             </button>
           );
         })}
-
       </div>
     </div>
   );

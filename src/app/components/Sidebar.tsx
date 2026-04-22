@@ -29,7 +29,6 @@ export default function Sidebar({ activeMenu = 'dashboard' }: SidebarProps) {
     { id: 'reservation', label: 'Reservation', icon: '📅' },
     { id: 'archived', label: 'Archived', icon: '🗄️' },
     { id: 'room', label: 'Room', icon: '🏠' },
-    { id: 'tools', label: 'Tool Inventory', icon: '🔧' },
     { id: 'settings', label: 'System Settings', icon: '⚙' },
   ];
 

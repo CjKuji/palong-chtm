@@ -22,11 +22,17 @@ export default function TemplateModal({ open, onClose }: any) {
   // LOAD ROOM TYPES
   // =========================
   const loadRoomTypes = async () => {
-    const data = await RoomService.getRoomTypes();
-    setRoomTypes(data || []);
+    try {
+      const data = await RoomService.getRoomTypes();
+      const safe = data || [];
 
-    if (data?.length > 0) {
-      setSelectedType(data[0]);
+      setRoomTypes(safe);
+
+      if (safe.length > 0 && !selectedType) {
+        setSelectedType(safe[0]);
+      }
+    } catch (err) {
+      console.error("[loadRoomTypes]", err);
     }
   };
 
@@ -46,9 +52,11 @@ export default function TemplateModal({ open, onClose }: any) {
       const tplItems = await RoomService.getTemplateItems(tpl.id);
 
       setTemplate(tpl);
-      setItems(tplItems || []);
+      setItems(tplItems ?? []);
     } catch (err) {
-      console.error(err);
+      console.error("[loadTemplate]", err);
+      setTemplate(null);
+      setItems([]);
     } finally {
       setLoading(false);
     }
@@ -62,14 +70,14 @@ export default function TemplateModal({ open, onClose }: any) {
 
     try {
       const item = await RoomService.addTemplateItem(template.id, {
-        item_name: newItem,
+        item_name: newItem.trim(),
         default_quantity: 1,
       });
 
       setItems((prev) => [...prev, item]);
       setNewItem("");
     } catch (err) {
-      console.error(err);
+      console.error("[handleAddItem]", err);
     }
   };
 
@@ -81,7 +89,7 @@ export default function TemplateModal({ open, onClose }: any) {
       await RoomService.deleteTemplateItem(id);
       setItems((prev) => prev.filter((i) => i.id !== id));
     } catch (err) {
-      console.error(err);
+      console.error("[handleDeleteItem]", err);
     }
   };
 
@@ -97,8 +105,10 @@ export default function TemplateModal({ open, onClose }: any) {
       );
 
       setEditingId(null);
+      setEditName("");
+      setEditQty(1);
     } catch (err) {
-      console.error(err);
+      console.error("[handleUpdateItem]", err);
     }
   };
 
@@ -106,14 +116,23 @@ export default function TemplateModal({ open, onClose }: any) {
   // EFFECTS
   // =========================
   useEffect(() => {
-    if (open) loadRoomTypes();
+    if (open) {
+      loadRoomTypes();
+    } else {
+      // reset modal state when closed
+      setSelectedType(null);
+      setTemplate(null);
+      setItems([]);
+      setEditingId(null);
+      setNewItem("");
+    }
   }, [open]);
 
   useEffect(() => {
-    if (selectedType) {
+    if (selectedType?.id) {
       loadTemplate(selectedType.id);
 
-      // reset edit state when switching tabs
+      // reset edit state when switching type
       setEditingId(null);
       setEditName("");
       setEditQty(1);
@@ -137,10 +156,10 @@ export default function TemplateModal({ open, onClose }: any) {
               <button
                 key={type.id}
                 onClick={() => setSelectedType(type)}
-                className={`px-3 py-1 text-sm rounded ${
+                className={`px-3 py-1 text-sm rounded transition ${
                   selectedType?.id === type.id
                     ? "bg-indigo-600 text-white"
-                    : "bg-gray-100"
+                    : "bg-gray-100 hover:bg-gray-200"
                 }`}
               >
                 {type.name}
@@ -155,12 +174,12 @@ export default function TemplateModal({ open, onClose }: any) {
             value={newItem}
             onChange={(e) => setNewItem(e.target.value)}
             placeholder="Add checklist item..."
-            className="flex-1 border px-2 py-1 text-sm rounded"
+            className="flex-1 border px-2 py-1 text-sm rounded focus:outline-none focus:ring"
           />
 
           <button
             onClick={handleAddItem}
-            className="px-3 py-1 bg-indigo-600 text-white text-sm rounded"
+            className="px-3 py-1 bg-indigo-600 text-white text-sm rounded hover:bg-indigo-700"
           >
             Add
           </button>
@@ -181,7 +200,7 @@ export default function TemplateModal({ open, onClose }: any) {
                 className="border rounded p-2 flex justify-between items-center"
               >
                 {editingId === item.id ? (
-                  <div className="flex gap-2 flex-1">
+                  <div className="flex gap-2 flex-1 items-center">
                     <input
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
@@ -190,6 +209,7 @@ export default function TemplateModal({ open, onClose }: any) {
 
                     <input
                       type="number"
+                      min={1}
                       value={editQty}
                       onChange={(e) =>
                         setEditQty(Number(e.target.value))
@@ -204,7 +224,7 @@ export default function TemplateModal({ open, onClose }: any) {
                           default_quantity: editQty,
                         })
                       }
-                      className="text-green-600 text-sm"
+                      className="text-green-600 text-sm hover:underline"
                     >
                       Save
                     </button>
@@ -225,16 +245,14 @@ export default function TemplateModal({ open, onClose }: any) {
                           setEditName(item.item_name);
                           setEditQty(item.default_quantity);
                         }}
-                        className="text-blue-500 text-sm"
+                        className="text-blue-500 text-sm hover:underline"
                       >
                         Edit
                       </button>
 
                       <button
-                        onClick={() =>
-                          handleDeleteItem(item.id)
-                        }
-                        className="text-red-500 text-sm"
+                        onClick={() => handleDeleteItem(item.id)}
+                        className="text-red-500 text-sm hover:underline"
                       >
                         Delete
                       </button>
@@ -250,7 +268,7 @@ export default function TemplateModal({ open, onClose }: any) {
         <div className="p-4 border-t flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm border rounded"
+            className="px-4 py-2 text-sm border rounded hover:bg-gray-100"
           >
             Close
           </button>

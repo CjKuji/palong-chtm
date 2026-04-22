@@ -1,15 +1,69 @@
 import { BookingStatus } from "./enums.types";
 
-/**
- * =========================
- * BOOKING TYPE (SCHEMA-ALIGNED)
- * =========================
- */
-export interface Booking {
+/* =========================================================
+  USER
+========================================================= */
 
-  // =========================================================
-  // CORE
-  // =========================================================
+export interface BookingUser {
+  id: string;
+  fname: string;
+  lname: string;
+  email?: string | null;
+}
+
+/* =========================================================
+  AMENITIES
+========================================================= */
+
+export interface BookingAmenity {
+  id: number;
+  name: string;
+}
+
+export interface BookingRoomAmenity {
+  amenities?: BookingAmenity | null;
+}
+
+/* =========================================================
+  ROOM TYPE
+========================================================= */
+
+export interface BookingRoomType {
+  id: number;
+  name: string;
+  capacity: number;
+  base_price: number;
+
+  room_amenities?: BookingRoomAmenity[];
+}
+
+/* =========================================================
+  ROOM
+========================================================= */
+
+export interface BookingRoom {
+  id: number;
+  room_number: string;
+  floor?: number | null;
+
+  room_type?: BookingRoomType | null;
+}
+
+/* =========================================================
+  LOGS
+========================================================= */
+
+export interface BookingLog {
+  id: number;
+  action: string;
+  created_at: string;
+}
+
+/* =========================================================
+  MAIN BOOKING
+========================================================= */
+
+export interface Booking {
   id: number;
 
   user_id: string;
@@ -31,62 +85,26 @@ export interface Booking {
   total_amount: number;
 
   has_child: boolean;
-  child_age_group?: string | null;
-
   has_pwd: boolean;
   has_senior: boolean;
 
+  child_age_group?: string | null;
+
   created_at: string;
 
-  // =========================================================
-  // RELATIONS (FIXED BASED ON YOUR SCHEMA)
-  // =========================================================
+  users?: BookingUser | null;
+  room?: BookingRoom | null;
 
-  users?: {
-    id: string;
-    fname: string;
-    lname: string;
-  };
+  logs?: BookingLog[];
+}
 
-  room?: {
-    id: number;
-    room_number: string;
+/* =========================================================
+  SERVICE META TYPE
+========================================================= */
 
-    room_type?: {
-      id: number;
-      name: string;
-      capacity: number;
-      base_price: number;
+export interface BookingWithMeta extends Booking {
+  amenities: string[];
 
-      room_amenities?: {
-        amenities?: {
-          id: number;
-          name: string;
-        };
-      }[];
-    };
-  };
-
-  // =========================================================
-  // DERIVED (FROM SERVICE MAPPING)
-  // =========================================================
-
-  /**
-   * Flattened amenities list (already processed in service)
-   */
-  amenities?: string[];
-
-  payments?: {
-    id: number;
-    amount: number;
-    status: string;
-    method: string;
-    paid_at: string | null;
-  }[];
-
-  logs?: {
-    id: number;
-    action: string;
-    created_at: string;
-  }[];
+  extra_bed_fee: number;
+  extra_bed_label: string;
 }

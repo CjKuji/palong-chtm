@@ -4,11 +4,11 @@ import { useEffect, useState } from 'react';
 import { BookingService } from '@/app/services/booking.service';
 import { Booking } from '@/types/booking.types';
 
-/* -----------------------------
-  FORMATTER
------------------------------- */
+/* =========================
+  FORMATTERS
+========================= */
 
-const formatDateTime = (date?: string) =>
+const formatDateTime = (date?: string | null) =>
   date
     ? new Date(date).toLocaleString('en-US', {
         dateStyle: 'medium',
@@ -16,9 +16,16 @@ const formatDateTime = (date?: string) =>
       })
     : '—';
 
-/* -----------------------------
+const formatCurrency = (value?: number | string | null) => {
+  const num = Number(value ?? 0);
+  return `₱${num.toLocaleString('en-PH', {
+    minimumFractionDigits: 2,
+  })}`;
+};
+
+/* =========================
   STATUS BADGE
------------------------------- */
+========================= */
 
 function StatusBadge({ status }: { status?: string }) {
   const styles: Record<string, string> = {
@@ -40,9 +47,9 @@ function StatusBadge({ status }: { status?: string }) {
   );
 }
 
-/* -----------------------------
+/* =========================
   SECTION
------------------------------- */
+========================= */
 
 function Section({
   title,
@@ -63,22 +70,22 @@ function Section({
   );
 }
 
-/* -----------------------------
+/* =========================
   PROPS
------------------------------- */
+========================= */
 
 interface Props {
   bookingId: number | null;
   onClose: () => void;
-  onApprove: (id: number) => void;
-  onDecline: (id: number) => void;
-  onCheckIn: (id: number) => void;
-  onCheckOut: (id: number) => void;
+  onApprove: (id: number) => void | Promise<void>;
+  onDecline: (id: number) => void | Promise<void>;
+  onCheckIn: (id: number) => void | Promise<void>;
+  onCheckOut: (id: number) => void | Promise<void>;
 }
 
-/* -----------------------------
+/* =========================
   MAIN MODAL
------------------------------- */
+========================= */
 
 export default function ReservationModal({
   bookingId,
@@ -88,9 +95,9 @@ export default function ReservationModal({
   onCheckIn,
   onCheckOut,
 }: Props) {
-
   const [booking, setBooking] = useState<Booking | null>(null);
   const [loading, setLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
     if (!bookingId) return;
@@ -108,33 +115,48 @@ export default function ReservationModal({
 
   if (!bookingId) return null;
 
-  /* -----------------------------
-    SAFE DERIVED DATA
-  ------------------------------ */
+  const runAction = async (action: () => Promise<any> | void) => {
+    try {
+      setActionLoading(true);
+      await action();
+      onClose();
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
-  const guestName = booking?.users
-    ? `${booking.users.fname} ${booking.users.lname}`
-    : 'Unknown Guest';
+  /* =========================
+    FIXED MAPPING (SERVICE OUTPUT)
+  ========================= */
 
-  const roomLabel = booking?.room
-    ? `Room ${booking.room.room_number}`
-    : 'Unassigned Room';
+  const guest = booking?.users;
 
-  const amenities: string[] = booking?.amenities ?? [];
-  const payments = booking?.payments ?? [];
-  const logs = booking?.logs ?? [];
+  const guestName =
+    guest?.fname || guest?.lname
+      ? `${guest?.fname ?? ''} ${guest?.lname ?? ''}`.trim()
+      : 'Unknown Guest';
 
-  const hasFlags =
-    booking?.has_child || booking?.has_pwd || booking?.has_senior;
+  const guestEmail = guest?.email ?? 'No email provided';
 
-  /* -----------------------------
+  // 🔥 FIXED: from mapBooking()
+  const roomNumber = (booking as any)?.room_number ?? 'Not assigned';
+  const roomFloor = (booking as any)?.floor ?? '—';
+  const roomType = (booking as any)?.room_type_name ?? 'Unknown type';
+  const amenities: string[] = (booking as any)?.amenities ?? [];
+
+  const extraBeds = booking?.extra_beds ?? 0;
+  const extraBedCost = (booking as any)?.extra_bed_fee ?? 0;
+
+  const totalAmount = Number(booking?.total_amount ?? 0);
+
+  /* =========================
     UI
------------------------------- */
+========================= */
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
 
-      <div className="w-full max-w-6xl rounded-2xl bg-white shadow-2xl overflow-hidden">
+      <div className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl overflow-hidden">
 
         {/* HEADER */}
         <div className="flex justify-between items-start border-b p-5">
@@ -142,9 +164,8 @@ export default function ReservationModal({
             <h2 className="text-lg font-semibold text-gray-900">
               Booking Details
             </h2>
-            <p className="text-sm text-gray-500 mt-1">
-              {guestName} • {roomLabel}
-            </p>
+            <p className="text-sm text-gray-500">{guestName}</p>
+            <p className="text-xs text-gray-400">{guestEmail}</p>
           </div>
 
           <button
@@ -162,81 +183,31 @@ export default function ReservationModal({
             <p className="text-sm text-gray-500">Loading booking...</p>
           ) : (
             <>
-              {/* STATUS + DATE RANGE FIXED */}
-              <div className="flex justify-between items-center">
-                <StatusBadge status={booking?.status} />
+              <StatusBadge status={booking?.status} />
 
-                <div className="text-sm text-gray-500 text-right">
-                  <div>
-                    {formatDateTime(booking?.start_at)} → {formatDateTime(booking?.end_at)}
-                  </div>
-
-                  {/* EXTRA VISUAL (CHECK-IN / CHECK-OUT) */}
-                  {(booking?.checked_in_at || booking?.checked_out_at) && (
-                    <div className="text-xs text-gray-400 mt-1">
-                      {booking?.checked_in_at && (
-                        <span>
-                          In: {formatDateTime(booking.checked_in_at)}{' '}
-                        </span>
-                      )}
-
-                      {booking?.checked_out_at && (
-                        <span>
-                          | Out: {formatDateTime(booking.checked_out_at)}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* GRID */}
               <div className="grid md:grid-cols-2 gap-5">
 
                 <Section title="Guest">
                   <p className="font-medium text-gray-900">{guestName}</p>
-                  <p className="text-xs text-gray-500">
-                    ID: {booking?.users?.id || '—'}
-                  </p>
+                  <p className="text-xs text-gray-500">{guestEmail}</p>
                 </Section>
 
-                <Section title="Room">
-                  <p>{roomLabel}</p>
+                <Section title="Room Details">
+                  <p>Room No: {roomNumber}</p>
+                  <p>Floor: {roomFloor}</p>
+                  <p>Type: {roomType}</p>
                 </Section>
 
                 <Section title="Stay Info">
                   <p>Guests: {booking?.guests ?? 1}</p>
-                  <p>Extra Beds: {booking?.extra_beds ?? 0}</p>
+                  <p>Extra Beds: {extraBeds}</p>
                 </Section>
 
-                <Section title="Guest Tags">
-                  {hasFlags ? (
-                    <div className="flex flex-wrap gap-2 text-xs">
-
-                      {booking?.has_child && (
-                        <span className="px-2 py-1 bg-yellow-50 text-yellow-700 rounded-full">
-                          Child {booking.child_age_group && `(${booking.child_age_group})`}
-                        </span>
-                      )}
-
-                      {booking?.has_pwd && (
-                        <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-full">
-                          PWD
-                        </span>
-                      )}
-
-                      {booking?.has_senior && (
-                        <span className="px-2 py-1 bg-purple-50 text-purple-700 rounded-full">
-                          Senior
-                        </span>
-                      )}
-
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-400">
-                      No special guest tags
-                    </p>
-                  )}
+                <Section title="Pricing">
+                  <p>Extra Beds: {formatCurrency(extraBedCost)}</p>
+                  <p className="font-semibold text-lg">
+                    Total: {formatCurrency(totalAmount)}
+                  </p>
                 </Section>
 
                 <Section title="Amenities">
@@ -256,32 +227,17 @@ export default function ReservationModal({
                   )}
                 </Section>
 
-                <Section title="Payments">
-                  {payments.length ? (
-                    payments.map((p, i) => (
-                      <div key={i} className="flex justify-between text-sm">
-                        <span>{p.method}</span>
-                        <span className="font-medium">₱{p.amount}</span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-gray-400">No payments</p>
-                  )}
-                </Section>
-
-                <Section title="Activity Logs">
-                  {logs.length ? (
-                    logs.map((l, i) => (
-                      <div key={i} className="flex justify-between text-xs">
-                        <span>{l.action}</span>
-                        <span className="text-gray-400">
-                          {formatDateTime(l.created_at)}
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm text-gray-400">No activity</p>
-                  )}
+                {/* ✅ RESTORED: Guest flags */}
+                <Section title="Guest Info">
+                  <p className="text-sm text-gray-600">
+                    {booking?.has_child ? '✓ With Child' : 'No Child'}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    {booking?.has_pwd ? '✓ PWD Guest' : 'No PWD'}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    {booking?.has_senior ? '✓ Senior Guest' : 'No Senior'}
+                  </p>
                 </Section>
 
               </div>
@@ -296,14 +252,16 @@ export default function ReservationModal({
             {booking.status === 'pending' && (
               <>
                 <button
-                  onClick={() => onDecline(booking.id)}
+                  disabled={actionLoading}
+                  onClick={() => runAction(() => onDecline(booking.id))}
                   className="px-4 py-2 text-sm bg-red-100 text-red-700 rounded-lg"
                 >
                   Reject
                 </button>
 
                 <button
-                  onClick={() => onApprove(booking.id)}
+                  disabled={actionLoading}
+                  onClick={() => runAction(() => onApprove(booking.id))}
                   className="px-4 py-2 text-sm bg-emerald-600 text-white rounded-lg"
                 >
                   Approve
@@ -313,7 +271,8 @@ export default function ReservationModal({
 
             {booking.status === 'approved' && (
               <button
-                onClick={() => onCheckIn(booking.id)}
+                disabled={actionLoading}
+                onClick={() => runAction(() => onCheckIn(booking.id))}
                 className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg"
               >
                 Check In
@@ -322,7 +281,8 @@ export default function ReservationModal({
 
             {booking.status === 'checked_in' && (
               <button
-                onClick={() => onCheckOut(booking.id)}
+                disabled={actionLoading}
+                onClick={() => runAction(() => onCheckOut(booking.id))}
                 className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg"
               >
                 Check Out

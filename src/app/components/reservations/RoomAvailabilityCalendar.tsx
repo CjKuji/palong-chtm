@@ -1,8 +1,14 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useEffect, useState, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
+
+/* =========================================================
+  TYPES
+========================================================= */
 
 interface BookingRange {
+  id?: number;
   start_at: string;
   room_id: number;
   checked_in_at?: string | null;
@@ -18,30 +24,40 @@ interface Room {
 interface Props {
   selectedRoom: number | null;
   setSelectedRoom: (id: number | null) => void;
+  setAvailability: React.Dispatch<React.SetStateAction<BookingRange[]>>;
   availability: BookingRange[];
   rooms: Room[];
   monthDays?: number;
 }
 
+/* =========================================================
+  COMPONENT
+========================================================= */
+
 export default function RoomAvailabilityCalendar({
   selectedRoom,
   setSelectedRoom,
-  availability = [],
-  rooms = [],
+  availability,
+  setAvailability,
+  rooms,
   monthDays = 30,
 }: Props) {
 
-  // =========================================================
-  // FILTER BOOKINGS BY ROOM
-  // =========================================================
+  const [loading] = useState(false);
+
+  /* =========================================================
+    FILTER BOOKINGS BY ROOM
+  ========================================================= */
+
   const roomBookings = useMemo(() => {
     if (!selectedRoom) return [];
     return availability.filter((b) => b.room_id === selectedRoom);
   }, [availability, selectedRoom]);
 
-  // =========================================================
-  // DATE HELPERS
-  // =========================================================
+  /* =========================================================
+    DATE HELPERS (SAFE NORMALIZATION)
+  ========================================================= */
+
   const normalizeDate = (date: Date) =>
     new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
@@ -50,54 +66,101 @@ export default function RoomAvailabilityCalendar({
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate();
 
-  // =========================================================
-  // BOOKING LOGIC (CLEAN HOTEL FLOW)
-  // =========================================================
-  const isBooked = (day: number) => {
-    if (!selectedRoom) return false;
+  /* =========================================================
+    BOOKING LOGIC
+  ========================================================= */
 
-    const today = new Date();
+  const isBooked = useCallback(
+    (day: number) => {
+      if (!selectedRoom) return false;
 
-    const targetDate = normalizeDate(
-      new Date(today.getFullYear(), today.getMonth(), day)
-    );
+      const today = new Date();
 
-    return roomBookings.some((b) => {
-      const start = normalizeDate(new Date(b.start_at));
+      const targetDate = normalizeDate(
+        new Date(today.getFullYear(), today.getMonth(), day)
+      );
 
-      const isCheckedIn = !!b.checked_in_at;
-      const isCheckedOut = !!b.checked_out_at;
+      return roomBookings.some((b) => {
+        const start = normalizeDate(new Date(b.start_at));
 
-      // ❌ COMPLETED → ignore completely
-      if (isCheckedOut) return false;
+        const isCheckedIn = !!b.checked_in_at;
+        const isCheckedOut = !!b.checked_out_at;
 
-      // 🟡 NOT CHECKED IN (pending / approved)
-      if (!isCheckedIn) {
-        return isSameDay(targetDate, start);
-      }
+        if (isCheckedOut) return false;
 
-      // 🔴 ACTIVE STAY (checked-in)
-      if (isCheckedIn && !isCheckedOut) {
+        if (!isCheckedIn) {
+          return isSameDay(targetDate, start);
+        }
+
         return targetDate >= start;
+      });
+    },
+    [roomBookings, selectedRoom]
+  );
+
+  /* =========================================================
+    REALTIME SUBSCRIPTION (FIXED + DEDUPED)
+  ========================================================= */
+
+  useEffect(() => {
+    const channel = supabase.channel('realtime-bookings-calendar');
+
+    channel.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'bookings' },
+      (payload) => {
+        const newRow = payload.new as BookingRange | null;
+        const oldRow = payload.old as BookingRange | null;
+
+        setAvailability((prev) => {
+          let updated = [...prev];
+
+          /* =========================
+            INSERT / UPDATE
+          ========================== */
+          if (newRow?.id != null) {
+            const index = updated.findIndex((b) => b.id === newRow.id);
+
+            if (index >= 0) {
+              updated[index] = {
+                ...updated[index],
+                ...newRow,
+              };
+            } else {
+              updated.push(newRow);
+            }
+          }
+
+          /* =========================
+            DELETE
+          ========================== */
+          if (payload.eventType === 'DELETE' && oldRow?.id != null) {
+            updated = updated.filter((b) => b.id !== oldRow.id);
+          }
+
+          return updated;
+        });
       }
+    ).subscribe();
 
-      return false;
-    });
-  };
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [setAvailability]);
 
-  // =========================================================
-  // UI STATE COLORS (future-ready hook)
-  // =========================================================
-  const getDayStyle = (booked: boolean) => {
-    if (booked) {
-      return "bg-red-500 text-white border-red-500 shadow-sm";
-    }
-    return "bg-green-50 text-gray-700 border-green-200";
-  };
+  /* =========================================================
+    STYLE
+========================================================= */
 
-  // =========================================================
-  // UI
-  // =========================================================
+  const getDayStyle = (booked: boolean) =>
+    booked
+      ? "bg-red-500 text-white border-red-500 shadow-sm"
+      : "bg-green-50 text-gray-700 border-green-200";
+
+  /* =========================================================
+    UI
+========================================================= */
+
   return (
     <div className="mt-6 rounded-xl border bg-white p-5 shadow-sm">
 
@@ -107,18 +170,9 @@ export default function RoomAvailabilityCalendar({
           Room Availability Calendar
         </h2>
 
-        {/* LEGEND */}
-        <div className="flex gap-3 text-xs">
-          <span className="flex items-center gap-1 text-green-600">
-            <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-            Available
-          </span>
-
-          <span className="flex items-center gap-1 text-red-600">
-            <span className="w-2 h-2 bg-red-500 rounded-full"></span>
-            Booked
-          </span>
-        </div>
+        <span className="text-xs text-gray-400">
+          {loading ? "Updating..." : "Live"}
+        </span>
       </div>
 
       {/* ROOM SELECT */}
@@ -127,20 +181,15 @@ export default function RoomAvailabilityCalendar({
         onChange={(e) =>
           setSelectedRoom(e.target.value ? Number(e.target.value) : null)
         }
-        className="mb-5 w-full sm:w-72 rounded-lg border border-gray-300 p-2 text-sm
-                   focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="mb-5 w-full sm:w-72 rounded-lg border border-gray-300 p-2 text-sm"
       >
         <option value="">Select Room</option>
 
-        {rooms.length === 0 ? (
-          <option disabled>No rooms available</option>
-        ) : (
-          rooms.map((room) => (
-            <option key={room.id} value={room.id}>
-              Room {room.room_number}
-            </option>
-          ))
-        )}
+        {rooms.map((room) => (
+          <option key={room.id} value={room.id}>
+            Room {room.room_number}
+          </option>
+        ))}
       </select>
 
       {/* EMPTY STATE */}
@@ -149,36 +198,21 @@ export default function RoomAvailabilityCalendar({
           Select a room to view its availability
         </div>
       ) : (
-        <>
-          {/* CALENDAR GRID */}
-          <div className="grid grid-cols-7 gap-2 text-sm">
+        <div className="grid grid-cols-7 gap-2 text-sm">
+          {Array.from({ length: monthDays }).map((_, i) => {
+            const day = i + 1;
+            const booked = isBooked(day);
 
-            {Array.from({ length: monthDays }).map((_, i) => {
-              const day = i + 1;
-              const booked = isBooked(day);
-
-              return (
-                <div
-                  key={day}
-                  className={`
-                    p-2 text-center rounded-lg border font-medium
-                    transition-all duration-200 cursor-default
-                    hover:scale-[1.03]
-                    ${getDayStyle(booked)}
-                  `}
-                >
-                  <span className="text-xs font-semibold">{day}</span>
-                </div>
-              );
-            })}
-
-          </div>
-
-          {/* FOOTER INFO */}
-          <div className="mt-4 text-xs text-gray-400">
-            Showing current month availability
-          </div>
-        </>
+            return (
+              <div
+                key={day}
+                className={`p-2 text-center rounded-lg border transition ${getDayStyle(booked)}`}
+              >
+                <span className="text-xs font-semibold">{day}</span>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );

@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
 
 import Sidebar from '@/app/components/Sidebar';
 import Topbar from '@/app/components/Topbar';
@@ -14,23 +15,20 @@ import { useReservations } from '@/app/hooks/useReservation';
 import { useRoomAvailability } from '@/app/hooks/useRoomAvailability';
 import { useSidebar } from '@/app/context/SidebarContext';
 
-type TabType =
-  | 'pending'
-  | 'approved'
-  | 'checked_in'
-  | 'checked_out'
-  | 'rejected';
+import { Booking } from '@/types/booking.types';
+
+type TabType = Booking['status'];
 
 export default function ReservationPage() {
-
   const [tab, setTab] = useState<TabType>('pending');
-  const [selected, setSelected] = useState<any>(null);
+  const [selected, setSelected] = useState<Booking | null>(null);
 
   const { collapsed } = useSidebar();
 
   const {
     reservations,
     actionLoading,
+    refresh,
     approve,
     decline,
     checkIn,
@@ -42,42 +40,134 @@ export default function ReservationPage() {
     selectedRoom,
     setSelectedRoom,
     availability,
+    refresh: refreshRooms,
     loading: roomLoading,
   } = useRoomAvailability();
 
-  // =========================
-  // SAFE RESERVATIONS
-  // =========================
-  const safeReservations = useMemo(
-    () => Array.isArray(reservations) ? reservations : [],
-    [reservations]
-  );
+  /* =========================================================
+    SAFE DATA
+  ========================================================= */
 
-  // =========================
-  // FILTER BY STATUS
-  // =========================
+  const safeReservations = useMemo(() => reservations ?? [], [reservations]);
+
   const filteredReservations = useMemo(() => {
-    return safeReservations.filter(r => r?.status === tab);
+    return safeReservations.filter((r) => r?.status === tab);
   }, [safeReservations, tab]);
+
+  /* =========================================================
+    FIX: SAFE REFRESH SELECTED BOOKING
+  ========================================================= */
+
+  const refreshSelected = useCallback(async (id: number) => {
+    if (!id) return;
+
+    const { data } = await supabase
+      .from('bookings')
+      .select(`
+        *,
+        users (id, fname, lname, email),
+        room:rooms (
+          id,
+          room_number,
+          floor,
+          room_type:room_types (
+            id,
+            name,
+            capacity,
+            base_price,
+            room_amenities (
+              amenity_id,
+              amenities (id, name)
+            )
+          )
+        ),
+        booking_logs (id, action, created_at)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (data) {
+      setSelected(data as Booking);
+    }
+  }, []);
+
+  /* =========================================================
+    ACTION WRAPPERS (KEEP UI + MODAL SYNC)
+  ========================================================= */
+
+  const handleApprove = async (id: number) => {
+    await approve(id);
+    await refresh();
+    await refreshSelected(id);
+  };
+
+  const handleDecline = async (id: number) => {
+    await decline(id);
+    await refresh();
+    await refreshSelected(id);
+  };
+
+  const handleCheckIn = async (id: number) => {
+    await checkIn(id);
+    await refresh();
+    await refreshSelected(id);
+  };
+
+  const handleCheckOut = async (id: number) => {
+    await checkOut(id);
+    await refresh();
+    await refreshSelected(id);
+  };
+
+  /* =========================================================
+    REALTIME SYNC (FIXED: NO LOOP / CLEAN CHANNEL)
+  ========================================================= */
+
+  useEffect(() => {
+    const channel = supabase.channel('realtime-reservations-page');
+
+    channel
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'bookings' },
+        () => refresh()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'rooms' },
+        () => refreshRooms()
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'archived_bookings' },
+        () => refresh()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [refresh, refreshRooms]);
+
+  /* =========================================================
+    UI
+  ========================================================= */
 
   return (
     <div className="min-h-screen bg-gray-50">
-
       <Sidebar activeMenu="reservation" />
       <Topbar />
 
-      <main className={`
-        pt-16 transition-all duration-300
-        ${collapsed ? 'ml-20' : 'ml-64'}
-      `}>
-
+      <main
+        className={`pt-16 transition-all duration-300 ${
+          collapsed ? 'ml-20' : 'ml-64'
+        }`}
+      >
         <div className="space-y-6 p-4 sm:p-6">
 
           {/* HEADER */}
           <div>
-            <h1 className="text-xl font-semibold">
-              Reservations
-            </h1>
+            <h1 className="text-xl font-semibold">Reservations</h1>
             <p className="text-sm text-gray-500">
               Manage bookings and room occupancy
             </p>
@@ -99,14 +189,13 @@ export default function ReservationPage() {
             <ReservationTable
               data={filteredReservations}
               onOpen={setSelected}
-              onCheckIn={checkIn}
-              onCheckOut={checkOut}
+              onCheckIn={handleCheckIn}
+              onCheckOut={handleCheckOut}
             />
           </div>
 
           {/* CALENDAR */}
           <div className="rounded-xl bg-white border p-4">
-
             {roomLoading ? (
               <p className="text-sm text-gray-500">Loading rooms...</p>
             ) : (
@@ -117,7 +206,6 @@ export default function ReservationPage() {
                 rooms={rooms}
               />
             )}
-
           </div>
 
         </div>
@@ -125,14 +213,13 @@ export default function ReservationPage() {
 
       {/* MODAL */}
       <ReservationModal
-        bookingId={selected?.id}
+        bookingId={selected?.id ?? null}
         onClose={() => setSelected(null)}
-        onApprove={approve}
-        onDecline={decline}
-        onCheckIn={checkIn}
-        onCheckOut={checkOut}
+        onApprove={handleApprove}
+        onDecline={handleDecline}
+        onCheckIn={handleCheckIn}
+        onCheckOut={handleCheckOut}
       />
-
     </div>
   );
 }

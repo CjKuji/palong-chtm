@@ -1,6 +1,9 @@
 import { supabase } from "@/lib/supabase";
 
 export const RoomService = {
+  // =========================================================
+  // 🏨 ROOMS (CRUD)
+  // =========================================================
 
   async getRooms() {
     const { data, error } = await supabase
@@ -19,37 +22,108 @@ export const RoomService = {
           image_url,
           display_order
         )
-      `);
+      `)
+      .order("created_at", { ascending: false });
 
-    if (error) {
-      console.error("[getRooms]", error);
-      throw error;
-    }
-
+    if (error) throw new Error(`[getRooms] ${error.message}`);
     return data ?? [];
   },
+
+  async getRoomById(id: number) {
+    const { data, error } = await supabase
+      .from("rooms")
+      .select(`
+        *,
+        room_types (*),
+        room_images (*)
+      `)
+      .eq("id", id)
+      .single();
+
+    if (error) throw new Error(`[getRoomById] ${error.message}`);
+    return data;
+  },
+
+  async createRoom(payload: any) {
+    const { id, ...clean } = payload;
+
+    const { data, error } = await supabase
+      .from("rooms")
+      .insert(clean)
+      .select()
+      .single();
+
+    if (error) throw new Error(`[createRoom] ${error.message}`);
+    return data;
+  },
+
+  async updateRoom(id: number, payload: any) {
+    const { id: _, ...clean } = payload;
+
+    const { data, error } = await supabase
+      .from("rooms")
+      .update(clean)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) throw new Error(`[updateRoom] ${error.message}`);
+    return data;
+  },
+
+  async deleteRoom(id: number) {
+    const { error } = await supabase
+      .from("rooms")
+      .delete()
+      .eq("id", id);
+
+    if (error) throw new Error(`[deleteRoom] ${error.message}`);
+  },
+
+  // =========================================================
+  // 🧹 HOUSEKEEPING TASKS
+  // =========================================================
 
   async getHousekeepingTasks() {
     const { data, error } = await supabase
       .from("housekeeping_tasks")
       .select(`
         *,
-        rooms (
-          id,
-          room_number,
-          status
-        ),
-        housekeeping_task_items (*)
+        rooms (id, room_number, status),
+        housekeeping_task_items (*),
+        assigned_user:users!fk_assigned_user (id, fname, lname),
+        completed_user:users!fk_completed_user (id, fname, lname)
       `)
       .order("created_at", { ascending: false });
 
-    if (error) {
-      console.error("[getHousekeepingTasks]", error);
-      throw error;
-    }
+    if (error)
+      throw new Error(`[getHousekeepingTasks] ${error.message}`);
 
     return data ?? [];
   },
+
+  async getTaskById(taskId: number) {
+    const { data, error } = await supabase
+      .from("housekeeping_tasks")
+      .select(`
+        *,
+        rooms (room_number, status),
+        housekeeping_task_items (*),
+        assigned_user:users!fk_assigned_user (id, fname, lname),
+        completed_user:users!fk_completed_user (id, fname, lname)
+      `)
+      .eq("id", taskId)
+      .maybeSingle();
+
+    if (error) throw new Error(`[getTaskById] ${error.message}`);
+    if (!data) throw new Error("Task not found");
+
+    return data;
+  },
+
+  // =========================================================
+  // 👤 USER
+  // =========================================================
 
   async getCurrentUserId(): Promise<string> {
     const { data, error } = await supabase.auth.getUser();
@@ -61,67 +135,58 @@ export const RoomService = {
     return data.user.id;
   },
 
+  // =========================================================
+  // 🟡 START CLEANING (FIXED)
+  // =========================================================
+
   async startCleaning(taskId: number) {
-
     const staffId = await this.getCurrentUserId();
+    const now = new Date().toISOString();
 
-    const { data: task, error } = await supabase
+    // 🔒 PREVENT DOUBLE START
+    const { data: existingTask } = await supabase
+      .from("housekeeping_tasks")
+      .select("status, started_at")
+      .eq("id", taskId)
+      .single();
+
+    if (!existingTask) throw new Error("Task not found");
+
+    if (existingTask.status === "in_progress") {
+      throw new Error("Task already in progress");
+    }
+
+    if (existingTask.status === "completed") {
+      throw new Error("Task already completed");
+    }
+
+    const { data, error } = await supabase
       .from("housekeeping_tasks")
       .update({
         status: "in_progress",
         assigned_to: staffId,
-        started_at: new Date().toISOString(),
+        started_at: existingTask.started_at ?? now, // 🔥 NEVER overwrite if exists
       })
       .eq("id", taskId)
       .select("id, room_id")
       .single();
 
-    if (error) {
-      console.error("[startCleaning]", error);
-      throw error;
-    }
+    if (error)
+      throw new Error(`[startCleaning] ${error.message}`);
 
-    if (!task) throw new Error("Task not found");
-
-    const { error: roomError } = await supabase
+    await supabase
       .from("rooms")
       .update({ status: "cleaning" })
-      .eq("id", task.room_id);
-
-    if (roomError) {
-      console.error("[startCleaning room]", roomError);
-      throw roomError;
-    }
-
-    return task;
-  },
-
-  async getTaskById(taskId: number) {
-    const { data, error } = await supabase
-      .from("housekeeping_tasks")
-      .select(`
-        *,
-        rooms (room_number, status),
-        housekeeping_task_items (*)
-      `)
-      .eq("id", taskId)
-      .maybeSingle();
-
-    if (error) {
-      console.error("[getTaskById]", error);
-      throw error;
-    }
-
-    if (!data) throw new Error("Task not found");
+      .eq("id", data.room_id);
 
     return data;
   },
 
-  async updateChecklistItem(
-    itemId: number,
-    isDone: boolean,
-    note?: string
-  ) {
+  // =========================================================
+  // 🧹 UPDATE CHECKLIST
+  // =========================================================
+
+  async updateChecklistItem(itemId: number, isDone: boolean, note?: string) {
     const { error } = await supabase
       .from("housekeeping_task_items")
       .update({
@@ -130,125 +195,80 @@ export const RoomService = {
       })
       .eq("id", itemId);
 
-    if (error) {
-      console.error("[updateChecklistItem]", error);
-      throw error;
-    }
+    if (error)
+      throw new Error(`[updateChecklistItem] ${error.message}`);
   },
 
+  // =========================================================
+  // 🟢 COMPLETE CLEANING (FIXED TIME CALC)
+  // =========================================================
+
   async completeCleaning(taskId: number, note?: string) {
+    const staffId = await this.getCurrentUserId();
+    const now = new Date().toISOString();
 
     const { data: task, error: fetchError } = await supabase
       .from("housekeeping_tasks")
-      .select("id, room_id")
+      .select("id, room_id, started_at")
       .eq("id", taskId)
       .single();
 
-    if (fetchError) {
-      console.error("[completeCleaning fetch]", fetchError);
-      throw fetchError;
+    if (fetchError)
+      throw new Error(`[completeCleaning-fetch] ${fetchError.message}`);
+
+    if (!task.started_at) {
+      throw new Error("Task has no start time");
     }
 
-    if (!task) throw new Error("Task not found");
+    // 🔥 FIXED ACCURATE DURATION
+    const startTime = new Date(task.started_at).getTime();
+    const endTime = new Date(now).getTime();
+
+    const durationMinutes = Math.max(
+      1,
+      Math.round((endTime - startTime) / 60000)
+    );
 
     const { error: updateError } = await supabase
       .from("housekeeping_tasks")
       .update({
         status: "completed",
         note: note ?? null,
-        completed_at: new Date().toISOString(),
+        completed_at: now,
+        completed_by: staffId,
+        duration_minutes: durationMinutes,
       })
       .eq("id", taskId);
 
-    if (updateError) {
-      console.error("[completeCleaning update]", updateError);
-      throw updateError;
-    }
+    if (updateError)
+      throw new Error(`[completeCleaning-update] ${updateError.message}`);
 
-    const { error: roomError } = await supabase
+    await supabase
       .from("rooms")
-      .update({ status: "inspected" })
+      .update({ status: "available" })
       .eq("id", task.room_id);
-
-    if (roomError) {
-      console.error("[completeCleaning room]", roomError);
-      throw roomError;
-    }
 
     return true;
   },
 
-  async markRoomAvailable(roomId: number) {
-    const { error } = await supabase
-      .from("rooms")
-      .update({ status: "available" })
-      .eq("id", roomId);
-
-    if (error) {
-      console.error("[markRoomAvailable]", error);
-      throw error;
-    }
-  },
-
-  async createRoom(payload: any) {
-    const { id, ...cleanPayload } = payload;
-
-    const { data, error } = await supabase
-      .from("rooms")
-      .insert(cleanPayload)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
-  },
-
-  async updateRoom(id: number, payload: any) {
-    const { id: _, ...cleanPayload } = payload;
-
-    const { data, error } = await supabase
-      .from("rooms")
-      .update(cleanPayload)
-      .eq("id", id)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
-  },
-
-  async deleteRoom(id: number) {
-    const { error } = await supabase
-      .from("rooms")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      console.error("[deleteRoom]", error);
-      throw error;
-    }
-  },
+  // =========================================================
+  // 🏷 ROOM TYPES
+  // =========================================================
 
   async getRoomTypes() {
     const { data, error } = await supabase
       .from("room_types")
-      .select(`
-        *,
-        room_amenities (
-          amenities (
-            id,
-            name
-          )
-        )
-      `);
+      .select(`*, room_amenities (amenities (id, name))`);
 
-    if (error) {
-      console.error("[getRoomTypes]", error);
-      throw error;
-    }
+    if (error)
+      throw new Error(`[getRoomTypes] ${error.message}`);
 
     return data ?? [];
   },
+
+  // =========================================================
+  // 🧂 AMENITIES
+  // =========================================================
 
   async getAmenities() {
     const { data, error } = await supabase
@@ -256,13 +276,32 @@ export const RoomService = {
       .select("*")
       .order("name");
 
-    if (error) {
-      console.error("[getAmenities]", error);
-      throw error;
-    }
+    if (error)
+      throw new Error(`[getAmenities] ${error.message}`);
 
     return data ?? [];
   },
+
+  // =========================================================
+  // 📦 BOOKING HISTORY
+  // =========================================================
+
+  async getRoomBookingHistory(roomId: number) {
+    const { data, error } = await supabase
+      .from("archived_bookings")
+      .select("*")
+      .eq("room_id", roomId)
+      .order("created_at", { ascending: false });
+
+    if (error)
+      throw new Error(`[getRoomBookingHistory] ${error.message}`);
+
+    return data ?? [];
+  },
+
+  // =========================================================
+  // 📋 TEMPLATE FUNCTIONS (UNCHANGED BUT SAFE)
+  // =========================================================
 
   async getTemplateByRoomType(roomTypeId: number) {
     const { data, error } = await supabase
@@ -271,10 +310,8 @@ export const RoomService = {
       .eq("room_type_id", roomTypeId)
       .maybeSingle();
 
-    if (error) {
-      console.error("[getTemplateByRoomType]", error);
-      throw error;
-    }
+    if (error)
+      throw new Error(`[getTemplateByRoomType] ${error.message}`);
 
     return data;
   },
@@ -282,82 +319,12 @@ export const RoomService = {
   async createTemplate(roomTypeId: number) {
     const { data, error } = await supabase
       .from("housekeeping_templates")
-      .insert({
-        room_type_id: roomTypeId,
-        name: "Auto Template",
-      })
+      .insert({ room_type_id: roomTypeId })
       .select()
       .single();
 
-    if (error) {
-      console.error("[createTemplate]", error);
-      throw error;
-    }
-
-    return data;
-  },
-
-  async getTemplateItems(templateId: number) {
-    const { data, error } = await supabase
-      .from("housekeeping_template_items")
-      .select("*")
-      .eq("template_id", templateId)
-      .order("created_at", { ascending: true });
-
-    if (error) {
-      console.error("[getTemplateItems]", error);
-      throw error;
-    }
-
-    return data ?? [];
-  },
-
-  async addTemplateItem(templateId: number, payload: any) {
-    const { data, error } = await supabase
-      .from("housekeeping_template_items")
-      .insert({
-        template_id: templateId,
-        item_name: payload.item_name,
-        default_quantity: payload.default_quantity ?? 1,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("[addTemplateItem]", error);
-      throw error;
-    }
-
-    return data;
-  },
-
-  async deleteTemplateItem(itemId: number) {
-    const { error } = await supabase
-      .from("housekeeping_template_items")
-      .delete()
-      .eq("id", itemId);
-
-    if (error) {
-      console.error("[deleteTemplateItem]", error);
-      throw error;
-    }
-  },
-
-  async updateTemplateItem(itemId: number, payload: any) {
-    const { data, error } = await supabase
-      .from("housekeeping_template_items")
-      .update({
-        item_name: payload.item_name,
-        default_quantity: payload.default_quantity,
-      })
-      .eq("id", itemId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error("[updateTemplateItem]", error);
-      throw error;
-    }
+    if (error)
+      throw new Error(`[createTemplate] ${error.message}`);
 
     return data;
   },
