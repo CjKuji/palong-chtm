@@ -66,6 +66,12 @@ export default function ReservationPage() {
       .select(`
         *,
         users (id, fname, lname, email),
+
+        approved_by_user:users!approved_by (id, fname, lname),
+        rejected_by_user:users!rejected_by (id, fname, lname),
+        checked_in_by_user:users!checked_in_by (id, fname, lname),
+        checked_out_by_user:users!checked_out_by (id, fname, lname),
+
         room:rooms (
           id,
           room_number,

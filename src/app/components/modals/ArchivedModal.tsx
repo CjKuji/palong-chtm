@@ -1,36 +1,17 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 
 interface Props {
   open: boolean;
   booking: any | null;
-  users?: any[];
   onClose: () => void;
-  formatDate: (date?: string | null) => string;
-}
-
-/* =========================================================
-  SAFE NAME RESOLVER
-========================================================= */
-function resolveName(users: any[], id?: any) {
-  if (!id) return '—';
-
-  const user = users.find(
-    (u) => String(u.id) === String(id)
-  );
-
-  if (!user) return `User #${id}`;
-
-  const full = `${user?.fname ?? ''} ${user?.lname ?? ''}`.trim();
-
-  return full || user?.email || `User #${id}`;
+  formatDate: (date: string | null | undefined) => string;
 }
 
 export default function ArchivedModal({
   open,
   booking,
-  users = [],
   onClose,
   formatDate,
 }: Props) {
@@ -45,20 +26,34 @@ export default function ArchivedModal({
     return () => window.removeEventListener('keydown', handle);
   }, [open, onClose]);
 
-  /* DEBUG (IMPORTANT FOR YOUR ISSUE) */
+  /* DEBUG */
   useEffect(() => {
     if (!open || !booking) return;
 
     console.log('🔥 ArchivedModal DEBUG');
-    console.log('booking:', booking);
-    console.log('users count:', users.length);
-    console.log('approved_by:', booking?.approved_by);
-    console.log('checked_in_by:', booking?.checked_in_by);
-    console.log('checked_out_by:', booking?.checked_out_by);
-    console.log('archived_by:', booking?.archived_by);
-  }, [open, booking, users]);
+    console.log(booking);
+  }, [open, booking]);
 
   if (!open || !booking) return null;
+
+  const guestName =
+    `${booking.guest_fname ?? ''} ${booking.guest_lname ?? ''}`.trim() ||
+    'Unknown Guest';
+
+  const approvedBy =
+    booking.approved_by_user
+      ? `${booking.approved_by_user.fname} ${booking.approved_by_user.lname}`
+      : '—';
+
+  const checkedInBy =
+    booking.checked_in_by_user
+      ? `${booking.checked_in_by_user.fname} ${booking.checked_in_by_user.lname}`
+      : '—';
+
+  const checkedOutBy =
+    booking.checked_out_by_user
+      ? `${booking.checked_out_by_user.fname} ${booking.checked_out_by_user.lname}`
+      : '—';
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -76,7 +71,7 @@ export default function ArchivedModal({
 
         {/* HEADER */}
         <h2 className="text-2xl font-bold mb-4">
-          {booking.guest_fname} {booking.guest_lname}
+          {guestName}
         </h2>
 
         <div className="grid md:grid-cols-2 gap-4 text-sm">
@@ -84,15 +79,18 @@ export default function ArchivedModal({
           {/* LEFT SIDE */}
           <div className="space-y-2">
 
-            <p><b>Room:</b> {booking.room_number}</p>
+            <p><b>Room:</b> {booking.room_number ?? '—'}</p>
 
             <p><b>Check-in:</b> {formatDate(booking.checked_in_at)}</p>
             <p><b>Check-out:</b> {formatDate(booking.checked_out_at)}</p>
 
-            <p><b>Total:</b> ₱{Number(booking.total_amount || 0).toLocaleString()}</p>
+            <p>
+              <b>Total:</b> ₱
+              {Number(booking.total_amount ?? 0).toLocaleString()}
+            </p>
 
-            <p><b>Guests:</b> {booking.guests}</p>
-            <p><b>Extra Beds:</b> {booking.extra_beds}</p>
+            <p><b>Guests:</b> {booking.guests ?? 0}</p>
+            <p><b>Extra Beds:</b> {booking.extra_beds ?? 0}</p>
 
           </div>
 
@@ -101,25 +99,9 @@ export default function ArchivedModal({
 
             <p><b>Status:</b> Archived</p>
 
-            <p>
-              <b>Approved By:</b>{' '}
-              {resolveName(users, booking.approved_by)}
-            </p>
-
-            <p>
-              <b>Checked In By:</b>{' '}
-              {resolveName(users, booking.checked_in_by)}
-            </p>
-
-            <p>
-              <b>Checked Out By:</b>{' '}
-              {resolveName(users, booking.checked_out_by)}
-            </p>
-
-            <p>
-              <b>Archived By:</b>{' '}
-              {resolveName(users, booking.archived_by)}
-            </p>
+            <p><b>Approved By:</b> {approvedBy}</p>
+            <p><b>Checked In By:</b> {checkedInBy}</p>
+            <p><b>Checked Out By:</b> {checkedOutBy}</p>
 
             <p><b>Child:</b> {booking.has_child ? 'Yes' : 'No'}</p>
             <p><b>PWD:</b> {booking.has_pwd ? 'Yes' : 'No'}</p>

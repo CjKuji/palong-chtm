@@ -1,7 +1,6 @@
 'use client';
 
-import { useMemo, useEffect, useState, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useMemo, useState, useCallback } from 'react';
 
 /* =========================================================
   TYPES
@@ -24,7 +23,6 @@ interface Room {
 interface Props {
   selectedRoom: number | null;
   setSelectedRoom: (id: number | null) => void;
-  setAvailability: React.Dispatch<React.SetStateAction<BookingRange[]>>;
   availability: BookingRange[];
   rooms: Room[];
   monthDays?: number;
@@ -38,7 +36,6 @@ export default function RoomAvailabilityCalendar({
   selectedRoom,
   setSelectedRoom,
   availability,
-  setAvailability,
   rooms,
   monthDays = 30,
 }: Props) {
@@ -97,56 +94,6 @@ export default function RoomAvailabilityCalendar({
     },
     [roomBookings, selectedRoom]
   );
-
-  /* =========================================================
-    REALTIME SUBSCRIPTION (FIXED + DEDUPED)
-  ========================================================= */
-
-  useEffect(() => {
-    const channel = supabase.channel('realtime-bookings-calendar');
-
-    channel.on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'bookings' },
-      (payload) => {
-        const newRow = payload.new as BookingRange | null;
-        const oldRow = payload.old as BookingRange | null;
-
-        setAvailability((prev) => {
-          let updated = [...prev];
-
-          /* =========================
-            INSERT / UPDATE
-          ========================== */
-          if (newRow?.id != null) {
-            const index = updated.findIndex((b) => b.id === newRow.id);
-
-            if (index >= 0) {
-              updated[index] = {
-                ...updated[index],
-                ...newRow,
-              };
-            } else {
-              updated.push(newRow);
-            }
-          }
-
-          /* =========================
-            DELETE
-          ========================== */
-          if (payload.eventType === 'DELETE' && oldRow?.id != null) {
-            updated = updated.filter((b) => b.id !== oldRow.id);
-          }
-
-          return updated;
-        });
-      }
-    ).subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [setAvailability]);
 
   /* =========================================================
     STYLE

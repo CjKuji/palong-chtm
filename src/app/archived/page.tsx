@@ -16,9 +16,6 @@ export default function Archived() {
   const [archivedBookings, setArchivedBookings] = useState<any[]>([]);
   const [modalBooking, setModalBooking] = useState<any | null>(null);
 
-  /* =========================================================
-    RESPONSIVE
-  ========================================================= */
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 640);
     check();
@@ -26,13 +23,13 @@ export default function Archived() {
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  /* =========================================================
-    FORMAT DATE
-  ========================================================= */
-  const formatDateTime = (date?: string) => {
+  const formatDateTime = (date?: string | null) => {
     if (!date) return '—';
 
-    return new Date(date).toLocaleString('en-US', {
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return '—';
+
+    return d.toLocaleString('en-US', {
       year: 'numeric',
       month: 'short',
       day: '2-digit',
@@ -42,9 +39,6 @@ export default function Archived() {
     });
   };
 
-  /* =========================================================
-    FETCH ARCHIVED BOOKINGS
-  ========================================================= */
   useEffect(() => {
     const fetchArchived = async () => {
       setLoading(true);
@@ -52,27 +46,27 @@ export default function Archived() {
       try {
         const { data, error } = await supabase
           .from('archived_bookings')
-          .select('*')
+          .select(`
+            *,
+            approved_by_user:users!approved_by(id, fname, lname),
+            checked_in_by_user:users!checked_in_by(id, fname, lname),
+            checked_out_by_user:users!checked_out_by(id, fname, lname)
+          `)
           .order('checked_out_at', { ascending: false });
 
         if (error) throw error;
 
-        const enriched = (data || []).map((b: any) => ({
+        const formatted = (data || []).map((b: any) => ({
           ...b,
-
           guest_name:
             `${b.guest_fname ?? ''} ${b.guest_lname ?? ''}`.trim() ||
             'Unknown Guest',
-
-          booked_by: b.booked_by ?? 'System User',
-          archived_by_name: b.archived_by_name ?? 'Auto-archived',
-
-          room_status: b.cleaned_at ? 'Cleaned' : 'Pending Cleanup',
+          room_status: 'Archived',
         }));
 
-        setArchivedBookings(enriched);
+        setArchivedBookings(formatted);
       } catch (err) {
-        console.error('Error fetching archived bookings:', err);
+        console.error('Archived fetch error:', err);
       } finally {
         setLoading(false);
       }
@@ -81,21 +75,11 @@ export default function Archived() {
     fetchArchived();
   }, []);
 
-  /* =========================================================
-    OPEN MODAL
-  ========================================================= */
   const openModal = (booking: any) => {
-    if (!booking?.id) {
-      console.warn('⚠️ Missing ID:', booking);
-      return;
-    }
-
+    if (!booking?.id) return;
     setModalBooking(booking);
   };
 
-  /* =========================================================
-    UI
-  ========================================================= */
   return (
     <div className="flex min-h-screen bg-gray-50">
 
@@ -191,9 +175,6 @@ export default function Archived() {
         </div>
       </main>
 
-      {/* ===================================================== */}
-      {/* MODAL (NO USERS PASSED — FIXED ARCHITECTURE) */}
-      {/* ===================================================== */}
       <ArchivedModal
         open={!!modalBooking}
         booking={modalBooking}
