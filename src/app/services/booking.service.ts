@@ -219,48 +219,52 @@ export class BookingService {
     if (status === "checked_out") {
       await this.generateHousekeepingFromTemplate(data, actorId);
 
-      const { data: freshBooking } = await supabase
-  .from("bookings")
-  .select(`
-    *,
-    payment_method,
-    start_at,
-    end_at,
-    guests,
-    message,
-    status,
-    total_amount,
-    extra_beds,
-    has_child,
-    has_pwd,
-    has_senior,
-    child_age_group,
+      const { data: freshBooking, error: freshError } = await supabase
+        .from("bookings")
+        .select(`
+          *,
+          payment_method,
+          start_at,
+          end_at,
+          guests,
+          message,
+          status,
+          total_amount,
+          extra_beds,
+          has_child,
+          has_pwd,
+          has_senior,
+          child_age_group,
+          checked_in_at,
+          checked_out_at,
 
-    checked_in_at,
-    checked_out_at,
+          users!fk_bookings_user (id, fname, lname, email),
 
-    users (id, fname, lname, email),
+          approved_by,
+          rejected_by,
+          checked_in_by,
+          checked_out_by,
 
-    approved_by,
-    rejected_by,
-    checked_in_by,
-    checked_out_by,
+          rooms (
+            id,
+            room_number,
+            floor,
+            room_type_id,
+            room_types (
+              id,
+              name,
+              capacity,
+              base_price
+            )
+          )
+        `)
+        .eq("id", data.id)
+        .single();
 
-    rooms (
-      id,
-      room_number,
-      floor,
-      room_type_id,
-      room_types (
-        id,
-        name,
-        capacity,
-        base_price
-      )
-    )
-  `)
-  .eq("id", data.id)
-  .single();
+      if (freshError || !freshBooking) {
+        console.error("[FRESH BOOKING ERROR]", freshError);
+        return; // 🚨 THIS is why archive was not happening
+      }
 
       await this.archiveBooking(freshBooking);
     }
