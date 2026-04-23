@@ -359,6 +359,50 @@ export const RoomService = {
     return true;
   },
 
+  async getTemplateByRoomType(roomTypeId: number) {
+    const { data, error } = await supabase
+      .from("housekeeping_templates")
+      .select(`
+        *,
+        housekeeping_template_items (*)
+      `)
+      .eq("room_type_id", roomTypeId)
+      .maybeSingle();
+
+    if (error)
+      throw new Error(`[getTemplateByRoomType] ${error.message}`);
+
+    return data;
+  },
+
+  async createTemplate(roomTypeId: number) {
+    const { data, error } = await supabase
+      .from("housekeeping_templates")
+      .insert({
+        room_type_id: roomTypeId,
+        name: "Default Template",
+      })
+      .select()
+      .single();
+
+    if (error)
+      throw new Error(`[createTemplate] ${error.message}`);
+
+    return data;
+  },
+
+  async getTemplateItems(templateId: number) {
+    const { data, error } = await supabase
+      .from("housekeeping_template_items")
+      .select("*")
+      .eq("template_id", templateId);
+
+    if (error)
+      throw new Error(`[getTemplateItems] ${error.message}`);
+
+    return data ?? [];
+  },
+
   /* =========================================================
     ROOM TYPES
   ========================================================= */
