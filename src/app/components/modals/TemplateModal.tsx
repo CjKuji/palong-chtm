@@ -3,7 +3,12 @@
 import { useEffect, useState } from "react";
 import { RoomService } from "@/app/services/room.service";
 
-export default function TemplateModal({ open, onClose }: any) {
+interface Props {
+  open: boolean;
+  onClose: () => void;
+}
+
+export default function TemplateModal({ open, onClose }: Props) {
   const [roomTypes, setRoomTypes] = useState<any[]>([]);
   const [selectedType, setSelectedType] = useState<any>(null);
 
@@ -18,27 +23,27 @@ export default function TemplateModal({ open, onClose }: any) {
   const [editName, setEditName] = useState("");
   const [editQty, setEditQty] = useState(1);
 
-  // =========================
-  // LOAD ROOM TYPES
-  // =========================
+  /* =========================================================
+    LOAD ROOM TYPES
+  ========================================================= */
   const loadRoomTypes = async () => {
     try {
       const data = await RoomService.getRoomTypes();
-      const safe = data || [];
+      const safe = data ?? [];
 
       setRoomTypes(safe);
 
-      if (safe.length > 0 && !selectedType) {
+      if (!selectedType && safe.length > 0) {
         setSelectedType(safe[0]);
       }
     } catch (err) {
-      console.error("[loadRoomTypes]", err);
+      console.error("[TemplateModal] loadRoomTypes", err);
     }
   };
 
-  // =========================
-  // LOAD TEMPLATE
-  // =========================
+  /* =========================================================
+    LOAD TEMPLATE (PER ROOM TYPE)
+  ========================================================= */
   const loadTemplate = async (roomTypeId: number) => {
     setLoading(true);
 
@@ -54,7 +59,7 @@ export default function TemplateModal({ open, onClose }: any) {
       setTemplate(tpl);
       setItems(tplItems ?? []);
     } catch (err) {
-      console.error("[loadTemplate]", err);
+      console.error("[TemplateModal] loadTemplate", err);
       setTemplate(null);
       setItems([]);
     } finally {
@@ -62,9 +67,9 @@ export default function TemplateModal({ open, onClose }: any) {
     }
   };
 
-  // =========================
-  // ADD ITEM
-  // =========================
+  /* =========================================================
+    ADD ITEM
+  ========================================================= */
   const handleAddItem = async () => {
     if (!newItem.trim() || !template) return;
 
@@ -77,25 +82,25 @@ export default function TemplateModal({ open, onClose }: any) {
       setItems((prev) => [...prev, item]);
       setNewItem("");
     } catch (err) {
-      console.error("[handleAddItem]", err);
+      console.error("[TemplateModal] handleAddItem", err);
     }
   };
 
-  // =========================
-  // DELETE ITEM
-  // =========================
+  /* =========================================================
+    DELETE ITEM
+  ========================================================= */
   const handleDeleteItem = async (id: number) => {
     try {
       await RoomService.deleteTemplateItem(id);
       setItems((prev) => prev.filter((i) => i.id !== id));
     } catch (err) {
-      console.error("[handleDeleteItem]", err);
+      console.error("[TemplateModal] handleDeleteItem", err);
     }
   };
 
-  // =========================
-  // UPDATE ITEM
-  // =========================
+  /* =========================================================
+    UPDATE ITEM
+  ========================================================= */
   const handleUpdateItem = async (id: number, value: any) => {
     try {
       const updated = await RoomService.updateTemplateItem(id, value);
@@ -108,27 +113,23 @@ export default function TemplateModal({ open, onClose }: any) {
       setEditName("");
       setEditQty(1);
     } catch (err) {
-      console.error("[handleUpdateItem]", err);
+      console.error("[TemplateModal] handleUpdateItem", err);
     }
   };
 
-  // =========================
-  // EFFECTS
-  // =========================
+  /* =========================================================
+    EFFECTS
+  ========================================================= */
+
   useEffect(() => {
-    if (open) {
-      loadRoomTypes();
-    } else {
-      // reset modal state when closed
-      setSelectedType(null);
-      setTemplate(null);
-      setItems([]);
-      setEditingId(null);
-      setNewItem("");
-    }
+    if (!open) return;
+
+    loadRoomTypes();
   }, [open]);
 
   useEffect(() => {
+    if (!open) return;
+
     if (selectedType?.id) {
       loadTemplate(selectedType.id);
 
@@ -137,15 +138,30 @@ export default function TemplateModal({ open, onClose }: any) {
       setEditName("");
       setEditQty(1);
     }
-  }, [selectedType]);
+  }, [selectedType, open]);
+
+  useEffect(() => {
+    if (!open) {
+      setRoomTypes([]);
+      setSelectedType(null);
+      setTemplate(null);
+      setItems([]);
+      setNewItem("");
+      setEditingId(null);
+    }
+  }, [open]);
 
   if (!open) return null;
+
+  /* =========================================================
+    UI
+  ========================================================= */
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white w-[520px] max-h-[80vh] rounded-xl shadow-lg flex flex-col">
 
-        {/* ================= HEADER ================= */}
+        {/* HEADER */}
         <div className="p-4 border-b">
           <h2 className="font-semibold text-lg">
             Manage Checklist Templates
@@ -168,7 +184,7 @@ export default function TemplateModal({ open, onClose }: any) {
           </div>
         </div>
 
-        {/* ================= ADD ITEM ================= */}
+        {/* ADD ITEM */}
         <div className="p-4 border-b flex gap-2">
           <input
             value={newItem}
@@ -185,7 +201,7 @@ export default function TemplateModal({ open, onClose }: any) {
           </button>
         </div>
 
-        {/* ================= LIST ================= */}
+        {/* LIST */}
         <div className="flex-1 overflow-y-auto p-4 space-y-2">
           {loading ? (
             <p className="text-sm text-gray-500">Loading...</p>
@@ -264,7 +280,7 @@ export default function TemplateModal({ open, onClose }: any) {
           )}
         </div>
 
-        {/* ================= FOOTER ================= */}
+        {/* FOOTER */}
         <div className="p-4 border-t flex justify-end">
           <button
             onClick={onClose}

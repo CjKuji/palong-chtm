@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import { useState, useMemo } from "react";
 
@@ -11,6 +11,12 @@ import HousekeepingModal from "@/app/components/modals/CheckListModal";
 import TemplateModal from "@/app/components/modals/TemplateModal";
 import RoomModal from "@/app/components/RoomModal";
 import RoomHistoryModal from "@/app/components/modals/RoomHistoryModal";
+
+import { formatDateTime } from "@/app/helpers/date.helpers";
+
+/* =========================================================
+  STATUS COLORS
+========================================================= */
 
 const statusColors: Record<string, string> = {
   available: "bg-green-100 text-green-700",
@@ -25,21 +31,9 @@ const taskColors: Record<string, string> = {
   completed: "bg-green-100 text-green-700",
 };
 
-const formatDateTime = (dateString?: string | null) => {
-  if (!dateString) return "N/A";
-
-  const date = new Date(dateString);
-  if (isNaN(date.getTime())) return "N/A";
-
-  return date.toLocaleString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-};
+/* =========================================================
+  PAGE
+========================================================= */
 
 export default function RoomsInventory() {
   const { collapsed } = useSidebar();
@@ -70,9 +64,10 @@ export default function RoomsInventory() {
     setHistoryRoom(room);
   };
 
-  // =========================================================
-  // LAST CLEANING PER ROOM
-  // =========================================================
+  /* =========================================================
+    LAST CLEANING MAP
+  ========================================================= */
+
   const lastCleaningMap = useMemo(() => {
     const map: Record<number, any> = {};
 
@@ -142,6 +137,11 @@ export default function RoomsInventory() {
                     {rooms.map((room) => {
                       const lastClean = lastCleaningMap[room.id];
 
+                      const roomTypeName =
+                        room.room_types?.name ||
+                        room.room_type?.name ||
+                        "No Room Type";
+
                       return (
                         <div
                           key={room.id}
@@ -152,10 +152,10 @@ export default function RoomsInventory() {
                             <div className="flex justify-between items-start">
                               <div>
                                 <h2 className="text-lg font-semibold text-gray-800">
-                                  Room {room.room_number}
+                                  {roomTypeName}
                                 </h2>
                                 <p className="text-xs text-gray-500">
-                                  {room.room_type?.name ?? "No type"}
+                                  Room Type
                                 </p>
                               </div>
 
@@ -169,7 +169,7 @@ export default function RoomsInventory() {
                               </span>
                             </div>
 
-                            {/* LAST CLEANED */}
+                            {/* CLEANING TIME FIX */}
                             <div className="text-xs text-gray-600 bg-gray-50 p-2 rounded-lg">
                               <p className="font-medium text-gray-700">
                                 🧹 Last cleaned
@@ -177,7 +177,9 @@ export default function RoomsInventory() {
 
                               {lastClean ? (
                                 <>
-                                  <p>{formatDateTime(lastClean.completed_at)}</p>
+                                  <p>
+                                    {formatDateTime(lastClean.completed_at)}
+                                  </p>
 
                                   <p className="text-gray-700 font-medium">
                                     Cleaned by:{" "}
@@ -193,7 +195,7 @@ export default function RoomsInventory() {
                           </div>
 
                           {/* ACTIONS */}
-                          <div className="px-4 py-3 flex items-center justify-between border-t bg-gray-50">
+                          <div className="px-4 py-3 flex justify-between border-t bg-gray-50">
 
                             <div className="flex gap-3">
                               <button
@@ -224,6 +226,7 @@ export default function RoomsInventory() {
                         </div>
                       );
                     })}
+
                   </div>
                 )}
               </section>
@@ -251,14 +254,19 @@ export default function RoomsInventory() {
                       const progress =
                         total === 0 ? 0 : (done / total) * 100;
 
+                      const roomTypeName =
+                        task.rooms?.room_types?.name ||
+                        `Room ${task.rooms?.room_number ?? "—"}`;
+
                       return (
                         <div
                           key={task.id}
                           className="bg-white p-4 rounded-xl shadow-sm border hover:shadow-md transition"
                         >
                           <div className="flex justify-between items-center">
+
                             <h3 className="font-semibold">
-                              Room {task.rooms?.room_number}
+                              {roomTypeName}
                             </h3>
 
                             <span
@@ -271,7 +279,7 @@ export default function RoomsInventory() {
                             </span>
                           </div>
 
-                          {/* PROGRESS BAR */}
+                          {/* PROGRESS */}
                           <div className="mt-3">
                             <div className="flex justify-between text-xs text-gray-500 mb-1">
                               <span>Progress</span>
@@ -280,13 +288,13 @@ export default function RoomsInventory() {
 
                             <div className="w-full bg-gray-200 rounded-full h-2">
                               <div
-                                className="h-2 bg-green-500 transition-all"
+                                className="h-2 bg-green-500"
                                 style={{ width: `${progress}%` }}
                               />
                             </div>
                           </div>
 
-                          {/* CLEANED BY */}
+                          {/* COMPLETED */}
                           {task.status === "completed" && (
                             <div className="mt-3 text-xs text-gray-600 space-y-1">
                               <p>
@@ -304,7 +312,9 @@ export default function RoomsInventory() {
                             </div>
                           )}
 
+                          {/* ACTIONS */}
                           <div className="mt-4 flex gap-2">
+
                             {task.status === "pending" && (
                               <button
                                 onClick={() => startCleaning(task.id)}
@@ -331,13 +341,16 @@ export default function RoomsInventory() {
                                 View
                               </button>
                             )}
+
                           </div>
                         </div>
                       );
                     })}
+
                   </div>
                 )}
               </section>
+
             </>
           )}
         </div>
@@ -367,11 +380,8 @@ export default function RoomsInventory() {
 
           const { id, ...payload } = savedRoom;
 
-          if (selectedRoom) {
-            updateRoom(selectedRoom.id, payload);
-          } else {
-            createRoom(payload);
-          }
+          if (selectedRoom) updateRoom(selectedRoom.id, payload);
+          else createRoom(payload);
         }}
       />
 

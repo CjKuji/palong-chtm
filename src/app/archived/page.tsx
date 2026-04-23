@@ -16,6 +16,9 @@ export default function Archived() {
   const [archivedBookings, setArchivedBookings] = useState<any[]>([]);
   const [modalBooking, setModalBooking] = useState<any | null>(null);
 
+  /* =========================================================
+    RESPONSIVE
+  ========================================================= */
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 640);
     check();
@@ -23,6 +26,9 @@ export default function Archived() {
     return () => window.removeEventListener('resize', check);
   }, []);
 
+  /* =========================================================
+    FORMAT DATE
+  ========================================================= */
   const formatDateTime = (date?: string | null) => {
     if (!date) return '—';
 
@@ -39,6 +45,9 @@ export default function Archived() {
     });
   };
 
+  /* =========================================================
+    FETCH ARCHIVED
+  ========================================================= */
   useEffect(() => {
     const fetchArchived = async () => {
       setLoading(true);
@@ -58,10 +67,13 @@ export default function Archived() {
 
         const formatted = (data || []).map((b: any) => ({
           ...b,
+
           guest_name:
             `${b.guest_fname ?? ''} ${b.guest_lname ?? ''}`.trim() ||
             'Unknown Guest',
-          room_status: 'Archived',
+
+          // ✅ IMPORTANT FIX: ROOM TYPE (NOT ROOM NUMBER)
+          room_type: b.room_type_name ?? 'Unknown Type',
         }));
 
         setArchivedBookings(formatted);
@@ -75,11 +87,17 @@ export default function Archived() {
     fetchArchived();
   }, []);
 
+  /* =========================================================
+    MODAL
+  ========================================================= */
   const openModal = (booking: any) => {
     if (!booking?.id) return;
     setModalBooking(booking);
   };
 
+  /* =========================================================
+    UI
+  ========================================================= */
   return (
     <div className="flex min-h-screen bg-gray-50">
 
@@ -94,12 +112,14 @@ export default function Archived() {
 
         <div className="px-6 py-8 max-w-7xl mx-auto">
 
+          {/* HEADER */}
           <div className="flex justify-between items-center mb-8 mt-20">
             <h1 className="text-3xl font-bold text-gray-800">
               Archived Bookings
             </h1>
           </div>
 
+          {/* TABLE CONTAINER */}
           <div className="bg-white rounded-xl shadow-md">
 
             <div className="bg-purple-600 px-6 py-4 rounded-t-xl">
@@ -117,10 +137,11 @@ export default function Archived() {
               ) : (
                 <table className="min-w-full divide-y divide-gray-200">
 
+                  {/* HEADER */}
                   <thead>
                     <tr className="text-left text-xs text-gray-500 uppercase">
                       <th>Guest</th>
-                      <th>Room</th>
+                      <th>Room Type</th>
                       <th>Check-in</th>
                       <th>Check-out</th>
                       <th>Total</th>
@@ -129,12 +150,22 @@ export default function Archived() {
                     </tr>
                   </thead>
 
+                  {/* BODY */}
                   <tbody>
                     {archivedBookings.map((b) => (
-                      <tr key={b.id} className="hover:bg-purple-50">
+                      <tr
+                        key={b.id}
+                        className="hover:bg-purple-50"
+                      >
 
-                        <td className="px-3 py-2">{b.guest_name}</td>
-                        <td className="px-3 py-2">{b.room_number}</td>
+                        <td className="px-3 py-2">
+                          {b.guest_name}
+                        </td>
+
+                        {/* ✅ FIXED: ROOM TYPE */}
+                        <td className="px-3 py-2 font-medium text-gray-700">
+                          {b.room_type}
+                        </td>
 
                         <td className="px-3 py-2">
                           {formatDateTime(b.checked_in_at)}
@@ -150,7 +181,7 @@ export default function Archived() {
 
                         <td className="px-3 py-2">
                           <span className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded">
-                            {b.room_status}
+                            Archived
                           </span>
                         </td>
 
@@ -175,6 +206,7 @@ export default function Archived() {
         </div>
       </main>
 
+      {/* MODAL */}
       <ArchivedModal
         open={!!modalBooking}
         booking={modalBooking}

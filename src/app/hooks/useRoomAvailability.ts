@@ -4,7 +4,7 @@ import { BookingService } from "@/app/services/booking.service";
 import { Booking } from "@/types/booking.types";
 
 /* =========================================================
-  TYPES (CLEANED)
+  TYPES
 ========================================================= */
 
 interface RoomType {
@@ -23,8 +23,12 @@ interface Room {
 interface BookingRange {
   id: number;
   room_id: number;
+
   start_at: string;
+  end_at: string; // ✅ FIX ADDED
+
   status: string;
+
   checked_in_at: string | null;
   checked_out_at: string | null;
 }
@@ -42,6 +46,9 @@ export function useRoomAvailability() {
 
   const isMounted = useRef(true);
 
+  /* =========================================================
+    MOUNT SAFETY
+  ========================================================= */
   useEffect(() => {
     return () => {
       isMounted.current = false;
@@ -49,7 +56,42 @@ export function useRoomAvailability() {
   }, []);
 
   /* =========================================================
-    FETCH ROOMS (FIXED RELATION HANDLING)
+    NORMALIZE ROOM
+  ========================================================= */
+  const normalizeRoom = (r: any): Room => ({
+    id: r.id,
+    room_number: r.room_number,
+    room_type: Array.isArray(r.room_types)
+      ? r.room_types[0] ?? null
+      : r.room_types ?? null,
+  });
+
+  /* =========================================================
+    FIXED BOOKING MAPPER (IMPORTANT)
+  ========================================================= */
+  const mapBooking = (b: Booking): BookingRange => {
+    const mapped = {
+      id: b.id,
+      room_id: b.room_id,
+
+      start_at: b.start_at,
+      end_at: b.end_at ?? b.start_at, // 🔥 fallback ONLY if missing
+
+      status: b.status,
+
+      checked_in_at: b.checked_in_at ?? null,
+      checked_out_at: b.checked_out_at ?? null,
+    };
+
+    if (!b.end_at) {
+      console.warn("⚠️ Missing end_at from DB:", b);
+    }
+
+    return mapped;
+  };
+
+  /* =========================================================
+    FETCH ROOMS
   ========================================================= */
   const fetchRooms = useCallback(async (): Promise<Room[]> => {
     const { data, error } = await supabase
@@ -66,17 +108,9 @@ export function useRoomAvailability() {
       `)
       .order("room_number", { ascending: true });
 
-    if (error) throw error;
+    if (error) throw new Error(error.message);
 
-    return (data ?? []).map((r: any) => ({
-      id: r.id,
-      room_number: r.room_number,
-
-      // IMPORTANT FIX: Supabase returns ARRAY sometimes
-      room_type: Array.isArray(r.room_types)
-        ? r.room_types[0] ?? null
-        : r.room_types ?? null,
-    }));
+    return (data ?? []).map(normalizeRoom);
   }, []);
 
   /* =========================================================
@@ -94,16 +128,9 @@ export function useRoomAvailability() {
 
       if (!isMounted.current) return;
 
-      const mappedBookings: BookingRange[] = (bookingsData ?? []).map(
-        (b: Booking) => ({
-          id: b.id,
-          room_id: b.room_id,
-          start_at: b.start_at,
-          status: b.status,
-          checked_in_at: b.checked_in_at ?? null,
-          checked_out_at: b.checked_out_at ?? null,
-        })
-      );
+      const mappedBookings = (bookingsData ?? []).map(mapBooking);
+
+      console.log("📦 BOOKINGS AFTER MAP:", mappedBookings);
 
       setRooms(roomsData);
       setAvailability(mappedBookings);
@@ -128,44 +155,47 @@ export function useRoomAvailability() {
     REALTIME SYNC
   ========================================================= */
   useEffect(() => {
-    const channel = supabase.channel("realtime-room-availability");
+    const channel = supabase
+      .channel("realtime-room-availability")
 
-    channel.on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "bookings" },
-      (payload) => {
-        const newRow = payload.new as Booking | null;
-        const oldRow = payload.old as Booking | null;
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "bookings" },
+        (payload) => {
+          const newRow = mapBooking(payload.new as Booking);
 
-        setAvailability((prev) => {
-          let updated = [...prev];
+          setAvailability((prev) => {
+            if (prev.some((b) => b.id === newRow.id)) return prev;
+            return [...prev, newRow];
+          });
+        }
+      )
 
-          if (newRow?.id) {
-            const mapped: BookingRange = {
-              id: newRow.id,
-              room_id: newRow.room_id,
-              start_at: newRow.start_at,
-              status: newRow.status,
-              checked_in_at: newRow.checked_in_at ?? null,
-              checked_out_at: newRow.checked_out_at ?? null,
-            };
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "bookings" },
+        (payload) => {
+          const newRow = mapBooking(payload.new as Booking);
 
-            const index = updated.findIndex((b) => b.id === newRow.id);
+          setAvailability((prev) =>
+            prev.map((b) => (b.id === newRow.id ? newRow : b))
+          );
+        }
+      )
 
-            if (index >= 0) updated[index] = mapped;
-            else updated.push(mapped);
-          }
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "bookings" },
+        (payload) => {
+          const oldRow = payload.old as Booking;
 
-          if (payload.eventType === "DELETE" && oldRow?.id) {
-            updated = updated.filter((b) => b.id !== oldRow.id);
-          }
+          setAvailability((prev) =>
+            prev.filter((b) => b.id !== oldRow.id)
+          );
+        }
+      )
 
-          return updated;
-        });
-      }
-    );
-
-    channel.subscribe();
+      .subscribe();
 
     return () => {
       supabase.removeChannel(channel);

@@ -4,7 +4,7 @@ import { BookingService } from "@/app/services/booking.service";
 import { Booking } from "@/types/booking.types";
 
 /* =========================================================
-  RESERVATIONS HOOK (CLEAN + SAFE + SYNCED)
+  RESERVATIONS HOOK (FINAL CLEAN VERSION)
 ========================================================= */
 
 export function useReservations() {
@@ -14,20 +14,12 @@ export function useReservations() {
   const [error, setError] = useState<string | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
+
   const isMounted = useRef(true);
 
   /* =========================================================
-    USER
+    MOUNT / UNMOUNT SAFETY
   ========================================================= */
-  useEffect(() => {
-    const loadUser = async () => {
-      const { data } = await supabase.auth.getUser();
-      setUserId(data.user?.id ?? null);
-    };
-
-    loadUser();
-  }, []);
-
   useEffect(() => {
     return () => {
       isMounted.current = false;
@@ -35,7 +27,27 @@ export function useReservations() {
   }, []);
 
   /* =========================================================
-    FETCH BOOKINGS (FROM SERVICE)
+    LOAD USER
+  ========================================================= */
+  useEffect(() => {
+    const loadUser = async () => {
+      const { data, error } = await supabase.auth.getUser();
+
+      if (!isMounted.current) return;
+
+      if (error || !data?.user?.id) {
+        setUserId(null);
+        return;
+      }
+
+      setUserId(data.user.id);
+    };
+
+    loadUser();
+  }, []);
+
+  /* =========================================================
+    FETCH BOOKINGS
   ========================================================= */
   const fetchReservations = useCallback(async () => {
     setLoading(true);
@@ -45,6 +57,7 @@ export function useReservations() {
       const data = await BookingService.getAll();
 
       if (!isMounted.current) return;
+
       setReservations(data ?? []);
     } catch (err: any) {
       if (!isMounted.current) return;
@@ -60,40 +73,43 @@ export function useReservations() {
   }, [fetchReservations]);
 
   /* =========================================================
-    REALTIME SYNC (SAFE MERGE)
+    REALTIME SYNC (STRICT + SAFE)
   ========================================================= */
   useEffect(() => {
     const channel = supabase
       .channel("realtime-bookings")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "bookings" },
+        { event: "INSERT", schema: "public", table: "bookings" },
         (payload) => {
-          const newRow = payload.new as Booking | null;
-          const oldRow = payload.old as Booking | null;
+          const newRow = payload.new as Booking;
 
           setReservations((prev) => {
-            let updated = [...prev];
-
-            if (newRow?.id) {
-              const index = updated.findIndex((b) => b.id === newRow.id);
-
-              if (index >= 0) {
-                updated[index] = {
-                  ...updated[index],
-                  ...newRow,
-                };
-              } else {
-                updated.unshift(newRow);
-              }
-            }
-
-            if (payload.eventType === "DELETE" && oldRow?.id) {
-              updated = updated.filter((b) => b.id !== oldRow.id);
-            }
-
-            return updated;
+            if (prev.some((b) => b.id === newRow.id)) return prev;
+            return [newRow, ...prev];
           });
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "bookings" },
+        (payload) => {
+          const newRow = payload.new as Booking;
+
+          setReservations((prev) =>
+            prev.map((b) => (b.id === newRow.id ? { ...b, ...newRow } : b))
+          );
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "DELETE", schema: "public", table: "bookings" },
+        (payload) => {
+          const oldRow = payload.old as Booking;
+
+          setReservations((prev) =>
+            prev.filter((b) => b.id !== oldRow.id)
+          );
         }
       )
       .subscribe();
@@ -104,20 +120,32 @@ export function useReservations() {
   }, []);
 
   /* =========================================================
-    ACTION WRAPPER
+    ACTION WRAPPER (SAFE + CONSISTENT)
   ========================================================= */
   const runAction = useCallback(
-    async (fn: () => Promise<Booking>) => {
+    async (fn: () => Promise<Booking | null>) => {
+      if (!userId) {
+        setError("User not authenticated");
+        return;
+      }
+
       setActionLoading(true);
       setError(null);
 
       try {
         const updated = await fn();
+
         if (!isMounted.current || !updated) return;
 
-        setReservations((prev) =>
-          prev.map((b) => (b.id === updated.id ? updated : b))
-        );
+        setReservations((prev) => {
+          const exists = prev.some((b) => b.id === updated.id);
+
+          if (!exists) return [updated, ...prev];
+
+          return prev.map((b) =>
+            b.id === updated.id ? { ...b, ...updated } : b
+          );
+        });
       } catch (err: any) {
         if (!isMounted.current) return;
         setError(err?.message || "Action failed");
@@ -126,17 +154,17 @@ export function useReservations() {
         setActionLoading(false);
       }
     },
-    []
+    [userId]
   );
 
   /* =========================================================
-    ACTIONS (USING FIXED SERVICE)
+    ACTIONS (SYNCED WITH BOOKING SERVICE)
   ========================================================= */
 
   const approve = useCallback(
     (id: number) =>
       runAction(() =>
-        BookingService.updateStatus(id, "approved", userId ?? undefined)
+        BookingService.updateStatus(id, "approved", userId!)
       ),
     [runAction, userId]
   );
@@ -144,7 +172,7 @@ export function useReservations() {
   const decline = useCallback(
     (id: number) =>
       runAction(() =>
-        BookingService.updateStatus(id, "rejected", userId ?? undefined)
+        BookingService.updateStatus(id, "rejected", userId!)
       ),
     [runAction, userId]
   );
@@ -152,7 +180,7 @@ export function useReservations() {
   const checkIn = useCallback(
     (id: number) =>
       runAction(() =>
-        BookingService.updateStatus(id, "checked_in", userId ?? undefined)
+        BookingService.updateStatus(id, "checked_in", userId!)
       ),
     [runAction, userId]
   );
@@ -160,11 +188,14 @@ export function useReservations() {
   const checkOut = useCallback(
     (id: number) =>
       runAction(() =>
-        BookingService.updateStatus(id, "checked_out", userId ?? undefined)
+        BookingService.updateStatus(id, "checked_out", userId!)
       ),
     [runAction, userId]
   );
 
+  /* =========================================================
+    RETURN
+  ========================================================= */
   return {
     reservations,
     loading,

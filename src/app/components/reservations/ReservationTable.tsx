@@ -3,6 +3,7 @@ import { Booking } from "@/types/booking.types";
 interface Props {
   data: Booking[];
   onOpen: (booking: Booking) => void;
+  onApprove: (id: number) => void;
   onCheckIn: (id: number) => void;
   onCheckOut: (id: number) => void;
 }
@@ -31,15 +32,22 @@ const statusBadge = (status?: Booking["status"]) => {
 };
 
 /* =========================================================
-  ACTION BUTTONS
+  ACTION BUTTONS (SYNCED WITH MODAL FLOW)
 ========================================================= */
 
 const ActionButtons = ({
   booking,
   onOpen,
+  onApprove,
   onCheckIn,
   onCheckOut,
-}: any) => {
+}: {
+  booking: Booking;
+  onOpen: (b: Booking) => void;
+  onApprove: (id: number) => void;
+  onCheckIn: (id: number) => void;
+  onCheckOut: (id: number) => void;
+}) => {
   const status = booking?.status;
 
   const btn =
@@ -47,6 +55,8 @@ const ActionButtons = ({
 
   return (
     <div className="flex justify-center gap-2 flex-wrap">
+
+      {/* VIEW */}
       <button
         onClick={() => onOpen(booking)}
         className={`${btn} bg-gray-800 text-white`}
@@ -54,15 +64,33 @@ const ActionButtons = ({
         View
       </button>
 
+      {/* =========================================================
+        APPROVE (PENDING ONLY)
+      ========================================================= */}
+      {status === "pending" && (
+        <button
+          onClick={() => onApprove(booking.id)}
+          className={`${btn} bg-blue-500 text-white`}
+        >
+          Approve
+        </button>
+      )}
+
+      {/* =========================================================
+        CHECK IN (APPROVED ONLY)
+      ========================================================= */}
       {status === "approved" && (
         <button
           onClick={() => onCheckIn(booking.id)}
-          className={`${btn} bg-blue-500 text-white`}
+          className={`${btn} bg-green-500 text-white`}
         >
           Check In
         </button>
       )}
 
+      {/* =========================================================
+        CHECK OUT (CHECKED IN ONLY)
+      ========================================================= */}
       {status === "checked_in" && (
         <button
           onClick={() => onCheckOut(booking.id)}
@@ -71,6 +99,7 @@ const ActionButtons = ({
           Check Out
         </button>
       )}
+
     </div>
   );
 };
@@ -82,22 +111,28 @@ const ActionButtons = ({
 export default function ReservationTable({
   data = [],
   onOpen,
+  onApprove,
   onCheckIn,
   onCheckOut,
 }: Props) {
   return (
     <div className="rounded-2xl border bg-white shadow-sm overflow-hidden">
+
       <div className="overflow-x-auto">
-        <table className="min-w-[850px] w-full text-sm">
+        <table className="min-w-[1000px] w-full text-sm">
 
           <thead className="bg-gray-50 border-b">
             <tr className="text-left text-gray-600">
+
               <th className="p-4">Guest</th>
-              <th className="p-4">Room</th>
-              <th className="p-4">Type</th>
+              <th className="p-4">Room Type</th>
+              <th className="p-4">Start At</th>
+              <th className="p-4">End At</th>
               <th className="p-4">Check-in</th>
+              <th className="p-4">Check-out</th>
               <th className="p-4">Status</th>
               <th className="p-4 text-center">Actions</th>
+
             </tr>
           </thead>
 
@@ -108,25 +143,38 @@ export default function ReservationTable({
                   `${r?.users?.fname ?? ""} ${r?.users?.lname ?? ""}`.trim() ||
                   "Guest";
 
-                /* ✅ FIXED ROOM */
-                const roomNumber = r?.rooms?.room_number ?? "—";
-
-                /* ✅ FIXED ROOM TYPE */
-                const roomType = r?.rooms?.room_types?.name ?? "Unknown Type";
-
-                const checkIn = r?.start_at
-                  ? new Date(r.start_at).toLocaleDateString()
-                  : "—";
+                const roomType =
+                  r?.room?.room_type?.name ?? "Unknown Type";
 
                 return (
                   <tr key={r.id} className="border-b hover:bg-gray-50">
+
                     <td className="p-4 font-medium">{guest}</td>
-
-                    <td className="p-4">Room {roomNumber}</td>
-
                     <td className="p-4 text-gray-600">{roomType}</td>
 
-                    <td className="p-4">{checkIn}</td>
+                    <td className="p-4">
+                      {r?.start_at
+                        ? new Date(r.start_at).toLocaleDateString()
+                        : "—"}
+                    </td>
+
+                    <td className="p-4">
+                      {r?.end_at
+                        ? new Date(r.end_at).toLocaleDateString()
+                        : "—"}
+                    </td>
+
+                    <td className="p-4">
+                      {r?.checked_in_at
+                        ? new Date(r.checked_in_at).toLocaleDateString()
+                        : "—"}
+                    </td>
+
+                    <td className="p-4">
+                      {r?.checked_out_at
+                        ? new Date(r.checked_out_at).toLocaleDateString()
+                        : "—"}
+                    </td>
 
                     <td className="p-4">
                       <span className={statusBadge(r.status)}>
@@ -138,16 +186,18 @@ export default function ReservationTable({
                       <ActionButtons
                         booking={r}
                         onOpen={onOpen}
+                        onApprove={onApprove}
                         onCheckIn={onCheckIn}
                         onCheckOut={onCheckOut}
                       />
                     </td>
+
                   </tr>
                 );
               })
             ) : (
               <tr>
-                <td colSpan={6} className="p-10 text-center text-gray-400">
+                <td colSpan={8} className="p-10 text-center text-gray-400">
                   No reservations found
                 </td>
               </tr>

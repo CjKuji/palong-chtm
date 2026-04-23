@@ -126,7 +126,7 @@ export default function ReservationModal({
   };
 
   /* =========================
-    FIXED MAPPING (SERVICE OUTPUT)
+    FIXED MAPPINGS
   ========================= */
 
   const guest = booking?.users;
@@ -138,16 +138,29 @@ export default function ReservationModal({
 
   const guestEmail = guest?.email ?? 'No email provided';
 
-  // 🔥 FIXED: from mapBooking()
-  const roomNumber = (booking as any)?.room_number ?? 'Not assigned';
-  const roomFloor = (booking as any)?.floor ?? '—';
-  const roomType = (booking as any)?.room_type_name ?? 'Unknown type';
-  const amenities: string[] = (booking as any)?.amenities ?? [];
+  /* ✅ FIX: correct source of room type */
+  const roomType =
+    booking?.room?.room_type?.name ?? 'Unknown Type';
+
+  /* ✅ FIX: comes from BookingService mapper */
+  const amenities: string[] = booking?.amenities ?? [];
 
   const extraBeds = booking?.extra_beds ?? 0;
-  const extraBedCost = (booking as any)?.extra_bed_fee ?? 0;
+  const extraBedCost = booking?.extra_bed_fee ?? 0;
 
   const totalAmount = Number(booking?.total_amount ?? 0);
+
+  /* =========================
+    TIMELINE
+  ========================= */
+
+  const startAt = booking?.start_at;
+  const endAt = booking?.end_at;
+
+  const checkedInAt = booking?.checked_in_at;
+  const checkedOutAt = booking?.checked_out_at;
+
+  const paymentMethod = booking?.payment_method ?? '—';
 
   /* =========================
     UI
@@ -192,18 +205,19 @@ export default function ReservationModal({
                   <p className="text-xs text-gray-500">{guestEmail}</p>
                 </Section>
 
-                <Section title="Room Details">
-                  <p>Room No: {roomNumber}</p>
-                  <p>Floor: {roomFloor}</p>
-                  <p>Type: {roomType}</p>
+                <Section title="Room Type">
+                  <p className="font-medium text-gray-900">{roomType}</p>
                 </Section>
 
-                <Section title="Stay Info">
-                  <p>Guests: {booking?.guests ?? 1}</p>
-                  <p>Extra Beds: {extraBeds}</p>
+                <Section title="Stay Timeline">
+                  <p>Start At: {formatDateTime(startAt)}</p>
+                  <p>End At: {formatDateTime(endAt)}</p>
+                  <p>Check-in: {formatDateTime(checkedInAt)}</p>
+                  <p>Check-out: {formatDateTime(checkedOutAt)}</p>
                 </Section>
 
-                <Section title="Pricing">
+                <Section title="Payment">
+                  <p>Method: {paymentMethod}</p>
                   <p>Extra Beds: {formatCurrency(extraBedCost)}</p>
                   <p className="font-semibold text-lg">
                     Total: {formatCurrency(totalAmount)}
@@ -227,17 +241,10 @@ export default function ReservationModal({
                   )}
                 </Section>
 
-                {/* ✅ RESTORED: Guest flags */}
                 <Section title="Guest Info">
-                  <p className="text-sm text-gray-600">
-                    {booking?.has_child ? '✓ With Child' : 'No Child'}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    {booking?.has_pwd ? '✓ PWD Guest' : 'No PWD'}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    {booking?.has_senior ? '✓ Senior Guest' : 'No Senior'}
-                  </p>
+                  <p>{booking?.has_child ? '✓ With Child' : 'No Child'}</p>
+                  <p>{booking?.has_pwd ? '✓ PWD Guest' : 'No PWD'}</p>
+                  <p>{booking?.has_senior ? '✓ Senior Guest' : 'No Senior'}</p>
                 </Section>
 
               </div>

@@ -1,26 +1,29 @@
-'use client';
+"use client";
 
-import { useState, useMemo, useEffect, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { supabase } from "@/lib/supabase";
 
-import Sidebar from '@/app/components/Sidebar';
-import Topbar from '@/app/components/Topbar';
+import Sidebar from "@/app/components/Sidebar";
+import Topbar from "@/app/components/Topbar";
 
-import ReservationTabs from '@/app/components/reservations/ReservationTabs';
-import ReservationTable from '@/app/components/reservations/ReservationTable';
-import RoomAvailabilityCalendar from '@/app/components/reservations/RoomAvailabilityCalendar';
-import ReservationModal from '@/app/components/modals/ReservationModal';
+import ReservationTabs from "@/app/components/reservations/ReservationTabs";
+import ReservationTable from "@/app/components/reservations/ReservationTable";
+import RoomAvailabilityCalendar from "@/app/components/reservations/RoomAvailabilityCalendar";
+import ReservationModal from "@/app/components/modals/ReservationModal";
 
-import { useReservations } from '@/app/hooks/useReservation';
-import { useRoomAvailability } from '@/app/hooks/useRoomAvailability';
-import { useSidebar } from '@/app/context/SidebarContext';
+import { useReservations } from "@/app/hooks/useReservation";
+import { useRoomAvailability } from "@/app/hooks/useRoomAvailability";
+import { useSidebar } from "@/app/context/SidebarContext";
 
-import { Booking } from '@/types/booking.types';
+import { Booking } from "@/types/booking.types";
 
-type TabType = Booking['status'];
+type TabType = Booking["status"];
 
 export default function ReservationPage() {
-  const [tab, setTab] = useState<TabType>('pending');
+  /* =========================================================
+    STATE
+  ========================================================= */
+  const [tab, setTab] = useState<TabType>("pending");
   const [selected, setSelected] = useState<Booking | null>(null);
 
   const { collapsed } = useSidebar();
@@ -55,14 +58,14 @@ export default function ReservationPage() {
   }, [safeReservations, tab]);
 
   /* =========================================================
-    FIX: SAFE REFRESH SELECTED BOOKING
+    REFRESH SELECTED BOOKING
   ========================================================= */
 
-  const refreshSelected = useCallback(async (id: number) => {
+  const refreshSelected = useCallback(async (id?: number | null) => {
     if (!id) return;
 
     const { data } = await supabase
-      .from('bookings')
+      .from("bookings")
       .select(`
         *,
         users (id, fname, lname, email),
@@ -89,7 +92,7 @@ export default function ReservationPage() {
         ),
         booking_logs (id, action, created_at)
       `)
-      .eq('id', id)
+      .eq("id", id)
       .single();
 
     if (data) {
@@ -98,62 +101,59 @@ export default function ReservationPage() {
   }, []);
 
   /* =========================================================
-    ACTION WRAPPERS (KEEP UI + MODAL SYNC)
+    ACTION WRAPPERS
   ========================================================= */
 
-  const handleApprove = async (id: number) => {
-    await approve(id);
-    await refresh();
-    await refreshSelected(id);
-  };
+  const handleAction = useCallback(
+    async (fn: (id: number) => Promise<void>, id?: number | null) => {
+      if (!id) return;
 
-  const handleDecline = async (id: number) => {
-    await decline(id);
-    await refresh();
-    await refreshSelected(id);
-  };
+      await fn(id);
+      await refresh();
+      await refreshSelected(id);
+    },
+    [refresh, refreshSelected]
+  );
 
-  const handleCheckIn = async (id: number) => {
-    await checkIn(id);
-    await refresh();
-    await refreshSelected(id);
-  };
-
-  const handleCheckOut = async (id: number) => {
-    await checkOut(id);
-    await refresh();
-    await refreshSelected(id);
-  };
+  const handleApprove = (id: number) => handleAction(approve, id);
+  const handleDecline = (id: number) => handleAction(decline, id);
+  const handleCheckIn = (id: number) => handleAction(checkIn, id);
+  const handleCheckOut = (id: number) => handleAction(checkOut, id);
 
   /* =========================================================
-    REALTIME SYNC (FIXED: NO LOOP / CLEAN CHANNEL)
+    REALTIME SYNC
   ========================================================= */
 
   useEffect(() => {
-    const channel = supabase.channel('realtime-reservations-page');
+    const channel = supabase.channel("realtime-reservations-page");
+
+    const handleBookingChange = () => {
+      refresh();
+      if (selected?.id) refreshSelected(selected.id);
+    };
 
     channel
       .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'bookings' },
-        () => refresh()
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bookings" },
+        handleBookingChange
       )
       .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'rooms' },
+        "postgres_changes",
+        { event: "*", schema: "public", table: "archived_bookings" },
+        handleBookingChange
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "rooms" },
         () => refreshRooms()
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'archived_bookings' },
-        () => refresh()
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [refresh, refreshRooms]);
+  }, [refresh, refreshRooms, refreshSelected, selected?.id]);
 
   /* =========================================================
     UI
@@ -166,7 +166,7 @@ export default function ReservationPage() {
 
       <main
         className={`pt-16 transition-all duration-300 ${
-          collapsed ? 'ml-20' : 'ml-64'
+          collapsed ? "ml-20" : "ml-64"
         }`}
       >
         <div className="space-y-6 p-4 sm:p-6">
@@ -195,6 +195,7 @@ export default function ReservationPage() {
             <ReservationTable
               data={filteredReservations}
               onOpen={setSelected}
+              onApprove={handleApprove}  
               onCheckIn={handleCheckIn}
               onCheckOut={handleCheckOut}
             />

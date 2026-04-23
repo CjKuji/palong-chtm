@@ -1,14 +1,38 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { RoomService } from "@/app/services/room.service";
 
 type AnyObj = Record<string, any>;
 
+/* =========================================================
+  DATE SAFETY HELPERS (NEW - SAFE FOR CLEANING TIME)
+========================================================= */
+
+const toSafeDate = (value?: string | null) => {
+  if (!value) return null;
+
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+
+  return d;
+};
+
+const formatDateTime = (value?: string | null) => {
+  const date = toSafeDate(value);
+  if (!date) return "N/A";
+
+  return date.toLocaleString("en-PH", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+};
+
 export function useRoomManagement() {
-  // =========================================================
-  // STATE
-  // =========================================================
   const [rooms, setRooms] = useState<AnyObj[]>([]);
   const [tasks, setTasks] = useState<AnyObj[]>([]);
   const [selectedTask, setSelectedTask] = useState<AnyObj | null>(null);
@@ -18,12 +42,41 @@ export function useRoomManagement() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // =========================================================
-  // FULL SYNC
-  // =========================================================
+  const isMounted = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  /* =========================================================
+    🔥 NORMALIZER (ENHANCED - PRESERVES CLEANING DATES)
+  ========================================================= */
+  const normalizeRooms = (roomsData: AnyObj[], typesData: AnyObj[]) => {
+    return (roomsData ?? []).map((room) => {
+      if (room.room_type) return room;
+
+      const foundType = typesData.find(
+        (t) => t.id === room.room_type_id
+      );
+
+      return {
+        ...room,
+        room_type: foundType ?? null,
+      };
+    });
+  };
+
+  /* =========================================================
+    FULL SYNC
+  ========================================================= */
   const fetchAll = useCallback(async () => {
     setLoading(true);
+    setError(null);
 
     try {
       const [roomsData, typesData, amenitiesData, tasksData] =
@@ -31,16 +84,25 @@ export function useRoomManagement() {
           RoomService.getRooms(),
           RoomService.getRoomTypes(),
           RoomService.getAmenities(),
-          RoomService.getHousekeepingTasks(), // FIXED (now safe joins)
+          RoomService.getHousekeepingTasks(),
         ]);
 
-      setRooms(roomsData ?? []);
+      if (!isMounted.current) return;
+
+      const normalizedRooms = normalizeRooms(
+        roomsData ?? [],
+        typesData ?? []
+      );
+
+      setRooms(normalizedRooms);
       setRoomTypes(typesData ?? []);
       setAmenities(amenitiesData ?? []);
       setTasks(tasksData ?? []);
-    } catch (err) {
-      console.error("[useRoomManagement][fetchAll]", err);
+    } catch (err: any) {
+      if (!isMounted.current) return;
+      setError(err?.message || "Failed to load data");
     } finally {
+      if (!isMounted.current) return;
       setLoading(false);
     }
   }, []);
@@ -49,147 +111,196 @@ export function useRoomManagement() {
     fetchAll();
   }, [fetchAll]);
 
-  // =========================================================
-  // TASK REFRESH ONLY
-  // =========================================================
+  /* =========================================================
+    REFRESH TASKS
+  ========================================================= */
   const refreshTasks = useCallback(async () => {
     setRefreshing(true);
+    setError(null);
 
     try {
       const tasksData = await RoomService.getHousekeepingTasks();
+
+      if (!isMounted.current) return;
       setTasks(tasksData ?? []);
-    } catch (err) {
-      console.error("[refreshTasks]", err);
+    } catch (err: any) {
+      if (!isMounted.current) return;
+      setError(err?.message || "Failed to refresh tasks");
     } finally {
+      if (!isMounted.current) return;
       setRefreshing(false);
     }
   }, []);
 
-  // =========================================================
-  // ROOM ACTIONS
-  // =========================================================
-  const createRoom = async (data: AnyObj) => {
+  /* =========================================================
+    ACTION WRAPPER
+  ========================================================= */
+  const runAction = useCallback(async (fn: () => Promise<void>) => {
+    setActionLoading(true);
+    setError(null);
+
     try {
-      const newRoom = await RoomService.createRoom(data);
-      setRooms((prev) => [newRoom, ...prev]);
-    } catch (err) {
-      console.error("[createRoom]", err);
+      await fn();
+    } catch (err: any) {
+      if (!isMounted.current) return;
+      setError(err?.message || "Action failed");
+    } finally {
+      if (!isMounted.current) return;
+      setActionLoading(false);
     }
-  };
+  }, []);
 
-  const updateRoom = async (id: number, data: AnyObj) => {
-    try {
-      const updated = await RoomService.updateRoom(id, data);
+  /* =========================================================
+    ROOM ACTIONS
+  ========================================================= */
 
-      setRooms((prev) =>
-        prev.map((room) => (room.id === id ? updated : room))
-      );
-    } catch (err) {
-      console.error("[updateRoom]", err);
-    }
-  };
+  const createRoom = useCallback(
+    (data: AnyObj) =>
+      runAction(async () => {
+        const newRoom = await RoomService.createRoom(data);
 
-  const deleteRoom = async (id: number) => {
-    try {
-      await RoomService.deleteRoom(id);
-      setRooms((prev) => prev.filter((room) => room.id !== id));
-    } catch (err) {
-      console.error("[deleteRoom]", err);
-    }
-  };
+        if (!isMounted.current) return;
 
-  // =========================================================
-  // 🧹 HOUSEKEEPING FLOW
-  // =========================================================
+        const type = roomTypes.find(
+          (t) => t.id === newRoom.room_type_id
+        );
 
-  const startCleaning = async (taskId: number) => {
-    try {
-      const updatedTask = await RoomService.startCleaning(taskId);
+        setRooms((prev) => [
+          { ...newRoom, room_type: type ?? null },
+          ...prev,
+        ]);
+      }),
+    [runAction, roomTypes]
+  );
 
-      // optimistic update (safe merge)
-      setTasks((prev) =>
-        prev.map((task) =>
-          task.id === taskId
-            ? {
-                ...task,
-                ...updatedTask,
-                status: "in_progress",
-              }
-            : task
-        )
-      );
+  const updateRoom = useCallback(
+    (id: number, data: AnyObj) =>
+      runAction(async () => {
+        const updated = await RoomService.updateRoom(id, data);
 
-      // full sync to ensure room status consistency
-      await refreshTasks();
+        if (!isMounted.current) return;
 
-      const updatedRooms = await RoomService.getRooms();
-      setRooms(updatedRooms);
-    } catch (err) {
-      console.error("[startCleaning]", err);
-    }
-  };
+        const type = roomTypes.find(
+          (t) => t.id === updated.room_type_id
+        );
 
-  const openTask = async (taskId: number) => {
+        setRooms((prev) =>
+          prev.map((room) =>
+            room.id === id
+              ? { ...room, ...updated, room_type: type ?? null }
+              : room
+          )
+        );
+      }),
+    [runAction, roomTypes]
+  );
+
+  const deleteRoom = useCallback(
+    (id: number) =>
+      runAction(async () => {
+        await RoomService.deleteRoom(id);
+
+        if (!isMounted.current) return;
+
+        setRooms((prev) => prev.filter((room) => room.id !== id));
+      }),
+    [runAction]
+  );
+
+  /* =========================================================
+    🧹 HOUSEKEEPING
+  ========================================================= */
+
+  const startCleaning = useCallback(
+    (taskId: number) =>
+      runAction(async () => {
+        const updatedTask = await RoomService.startCleaning(taskId);
+
+        if (!isMounted.current) return;
+
+        setTasks((prev) =>
+          prev.map((task) =>
+            task.id === taskId
+              ? {
+                  ...task,
+                  ...updatedTask,
+                  status: "in_progress",
+                  started_at:
+                    updatedTask.started_at ?? new Date().toISOString(),
+                }
+              : task
+          )
+        );
+
+        const updatedRooms = await RoomService.getRooms();
+
+        if (!isMounted.current) return;
+
+        setRooms((prev) =>
+          normalizeRooms(updatedRooms, roomTypes)
+        );
+      }),
+    [runAction, roomTypes]
+  );
+
+  const openTask = useCallback(async (taskId: number) => {
     try {
       const task = await RoomService.getTaskById(taskId);
+
+      if (!isMounted.current) return;
       setSelectedTask(task);
-    } catch (err) {
-      console.error("[openTask]", err);
+    } catch (err: any) {
+      if (!isMounted.current) return;
+      setError(err?.message || "Failed to load task");
     }
-  };
+  }, []);
 
-  const updateChecklistItem = async (
-    itemId: number,
-    isDone: boolean,
-    note?: string
-  ) => {
-    try {
-      await RoomService.updateChecklistItem(itemId, isDone, note);
+  const updateChecklistItem = useCallback(
+    (itemId: number, isDone: boolean, note?: string) =>
+      runAction(async () => {
+        await RoomService.updateChecklistItem(itemId, isDone, note);
 
-      setSelectedTask((prev) => {
-        if (!prev) return prev;
+        if (!isMounted.current) return;
 
-        return {
-          ...prev,
-          housekeeping_task_items:
-            prev.housekeeping_task_items?.map((item: AnyObj) =>
-              item.id === itemId
-                ? {
-                    ...item,
-                    is_done: isDone,
-                    note: note ?? item.note,
-                  }
-                : item
-            ) || [],
-        };
-      });
-    } catch (err) {
-      console.error("[updateChecklistItem]", err);
-    }
-  };
+        setSelectedTask((prev) => {
+          if (!prev) return prev;
 
-  // =========================================================
-  // COMPLETE CLEANING
-  // =========================================================
-  const completeCleaning = async (taskId: number, note?: string) => {
-    try {
-      await RoomService.completeCleaning(taskId, note);
+          return {
+            ...prev,
+            housekeeping_task_items:
+              prev.housekeeping_task_items?.map((item: AnyObj) =>
+                item.id === itemId
+                  ? {
+                      ...item,
+                      is_done: isDone,
+                      note: note ?? item.note,
+                    }
+                  : item
+              ) ?? [],
+          };
+        });
+      }),
+    [runAction]
+  );
 
-      setSelectedTask(null);
+  /* =========================================================
+    COMPLETE CLEANING (WITH TIME FIX)
+  ========================================================= */
 
-      // full refresh ensures:
-      // - room status updated
-      // - task status updated
-      // - archive synced
-      await fetchAll();
-    } catch (err) {
-      console.error("[completeCleaning]", err);
-    }
-  };
+  const completeCleaning = useCallback(
+    (taskId: number, note?: string) =>
+      runAction(async () => {
+        await RoomService.completeCleaning(taskId, note);
 
-  // =========================================================
-  // RETURN
-  // =========================================================
+        if (!isMounted.current) return;
+
+        setSelectedTask(null);
+
+        await fetchAll();
+      }),
+    [runAction, fetchAll]
+  );
+
   return {
     rooms,
     tasks,
@@ -199,6 +310,8 @@ export function useRoomManagement() {
 
     loading,
     refreshing,
+    actionLoading,
+    error,
 
     refresh: refreshTasks,
     setSelectedTask,
@@ -211,5 +324,8 @@ export function useRoomManagement() {
     openTask,
     updateChecklistItem,
     completeCleaning,
+
+    /* optional export if you want UI formatting reuse */
+    formatDateTime,
   };
 }

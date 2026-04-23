@@ -31,6 +31,7 @@ export interface BookingRoomAmenity {
 export interface BookingRoomType {
   id: number;
   name: string;
+  description?: string | null;
   capacity: number;
   base_price: number;
 
@@ -45,6 +46,7 @@ export interface BookingRoom {
   id: number;
   room_number: string;
   floor?: number | null;
+  status?: string;
 
   room_type?: BookingRoomType | null;
 }
@@ -60,6 +62,12 @@ export interface BookingLog {
 }
 
 /* =========================================================
+  PAYMENT
+========================================================= */
+
+export type PaymentMethod = "Gcash" | "Cash";
+
+/* =========================================================
   MAIN BOOKING
 ========================================================= */
 
@@ -70,6 +78,7 @@ export interface Booking {
   room_id: number;
 
   start_at: string;
+  end_at?: string | null;
 
   guests: number;
   extra_beds: number;
@@ -90,8 +99,11 @@ export interface Booking {
 
   child_age_group?: string | null;
 
+  payment_method?: PaymentMethod | null;
+
   created_at: string;
 
+  /* 🔗 RELATIONS (Supabase joins) */
   users?: BookingUser | null;
   room?: BookingRoom | null;
 

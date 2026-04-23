@@ -1,47 +1,146 @@
 import { supabase } from "@/lib/supabase";
 
+/* =========================================================
+  DATE HELPERS (NEW – SAFE CLEANING TIME HANDLING)
+========================================================= */
+
+export const toLocalDateTime = (value?: string | null) => {
+  if (!value) return null;
+
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+
+  return d;
+};
+
+export const formatDateTime = (dateString?: string | null) => {
+  if (!dateString) return "N/A";
+
+  const date = toLocalDateTime(dateString);
+  if (!date) return "N/A";
+
+  return date.toLocaleString("en-PH", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+};
+
+/* OPTIONAL DEBUG HELPER (safe to keep for dev) */
+export const formatDebugDate = (label: string, value?: string | null) => {
+  if (!value) {
+    console.log(`❌ ${label}: NULL`);
+    return;
+  }
+
+  const d = new Date(value);
+
+  console.log(`🧪 ${label}:`, {
+    raw: value,
+    parsed: d.toString(),
+    iso: d.toISOString(),
+    local: d.toLocaleString("en-PH"),
+  });
+};
+
+/* =========================================================
+  NORMALIZER
+========================================================= */
+const normalizeRoom = (room: any, roomTypes: any[]) => {
+  return {
+    ...room,
+    room_type:
+      roomTypes.find((t) => t.id === room.room_type_id) ?? null,
+  };
+};
+
+/* =========================================================
+  ROOM SERVICE
+========================================================= */
 export const RoomService = {
-  // =========================================================
-  // 🏨 ROOMS (CRUD)
-  // =========================================================
+  /* =========================================================
+    🏨 ROOMS
+  ========================================================= */
 
   async getRooms() {
-    const { data, error } = await supabase
-      .from("rooms")
-      .select(`
-        *,
-        room_types (
+    const [roomsRes, typesRes] = await Promise.all([
+      supabase
+        .from("rooms")
+        .select(`
           id,
-          name,
-          capacity,
-          base_price,
-          description
-        ),
-        room_images (
-          id,
-          image_url,
-          display_order
-        )
-      `)
-      .order("created_at", { ascending: false });
+          room_number,
+          floor,
+          status,
+          room_type_id,
+          created_at,
 
-    if (error) throw new Error(`[getRooms] ${error.message}`);
-    return data ?? [];
+          room_types (
+            id,
+            name,
+            capacity,
+            base_price,
+            description,
+
+            room_amenities (
+              amenities (
+                id,
+                name
+              )
+            )
+          ),
+
+          room_images (
+            id,
+            image_url,
+            display_order
+          )
+        `)
+        .order("created_at", { ascending: false }),
+
+      supabase.from("room_types").select("*"),
+    ]);
+
+    if (roomsRes.error)
+      throw new Error(`[getRooms] ${roomsRes.error.message}`);
+
+    if (typesRes.error)
+      throw new Error(`[getRoomTypes] ${typesRes.error.message}`);
+
+    const rooms = roomsRes.data ?? [];
+    const types = typesRes.data ?? [];
+
+    return rooms.map((room) => normalizeRoom(room, types));
   },
 
   async getRoomById(id: number) {
-    const { data, error } = await supabase
-      .from("rooms")
-      .select(`
-        *,
-        room_types (*),
-        room_images (*)
-      `)
-      .eq("id", id)
-      .single();
+    const [roomRes, typesRes] = await Promise.all([
+      supabase
+        .from("rooms")
+        .select(`
+          *,
+          room_types (
+            *,
+            room_amenities (
+              amenities (id, name)
+            )
+          ),
+          room_images (*)
+        `)
+        .eq("id", id)
+        .maybeSingle(),
 
-    if (error) throw new Error(`[getRoomById] ${error.message}`);
-    return data;
+      supabase.from("room_types").select("*"),
+    ]);
+
+    if (roomRes.error)
+      throw new Error(`[getRoomById] ${roomRes.error.message}`);
+
+    if (!roomRes.data) throw new Error("Room not found");
+
+    return normalizeRoom(roomRes.data, typesRes.data ?? []);
   },
 
   async createRoom(payload: any) {
@@ -54,6 +153,7 @@ export const RoomService = {
       .single();
 
     if (error) throw new Error(`[createRoom] ${error.message}`);
+
     return data;
   },
 
@@ -68,6 +168,7 @@ export const RoomService = {
       .single();
 
     if (error) throw new Error(`[updateRoom] ${error.message}`);
+
     return data;
   },
 
@@ -80,16 +181,26 @@ export const RoomService = {
     if (error) throw new Error(`[deleteRoom] ${error.message}`);
   },
 
-  // =========================================================
-  // 🧹 HOUSEKEEPING TASKS
-  // =========================================================
+  /* =========================================================
+    🧹 HOUSEKEEPING TASKS
+  ========================================================= */
 
   async getHousekeepingTasks() {
     const { data, error } = await supabase
       .from("housekeeping_tasks")
       .select(`
         *,
-        rooms (id, room_number, status),
+        rooms (
+          id,
+          room_number,
+          status,
+          room_types (
+            id,
+            name,
+            capacity,
+            base_price
+          )
+        ),
         housekeeping_task_items (*),
         assigned_user:users!fk_assigned_user (id, fname, lname),
         completed_user:users!fk_completed_user (id, fname, lname)
@@ -107,23 +218,26 @@ export const RoomService = {
       .from("housekeeping_tasks")
       .select(`
         *,
-        rooms (room_number, status),
         housekeeping_task_items (*),
-        assigned_user:users!fk_assigned_user (id, fname, lname),
+        rooms (
+          id,
+          room_number,
+          room_types (id, name)
+        ),
         completed_user:users!fk_completed_user (id, fname, lname)
       `)
       .eq("id", taskId)
-      .maybeSingle();
+      .single();
 
-    if (error) throw new Error(`[getTaskById] ${error.message}`);
-    if (!data) throw new Error("Task not found");
+    if (error)
+      throw new Error(`[getTaskById] ${error.message}`);
 
     return data;
   },
 
-  // =========================================================
-  // 👤 USER
-  // =========================================================
+  /* =========================================================
+    USER
+  ========================================================= */
 
   async getCurrentUserId(): Promise<string> {
     const { data, error } = await supabase.auth.getUser();
@@ -135,15 +249,14 @@ export const RoomService = {
     return data.user.id;
   },
 
-  // =========================================================
-  // 🟡 START CLEANING (FIXED)
-  // =========================================================
+  /* =========================================================
+    START CLEANING (stores START time)
+  ========================================================= */
 
   async startCleaning(taskId: number) {
     const staffId = await this.getCurrentUserId();
     const now = new Date().toISOString();
 
-    // 🔒 PREVENT DOUBLE START
     const { data: existingTask } = await supabase
       .from("housekeeping_tasks")
       .select("status, started_at")
@@ -152,20 +265,12 @@ export const RoomService = {
 
     if (!existingTask) throw new Error("Task not found");
 
-    if (existingTask.status === "in_progress") {
-      throw new Error("Task already in progress");
-    }
-
-    if (existingTask.status === "completed") {
-      throw new Error("Task already completed");
-    }
-
     const { data, error } = await supabase
       .from("housekeeping_tasks")
       .update({
         status: "in_progress",
         assigned_to: staffId,
-        started_at: existingTask.started_at ?? now, // 🔥 NEVER overwrite if exists
+        started_at: existingTask.started_at ?? now,
       })
       .eq("id", taskId)
       .select("id, room_id")
@@ -174,19 +279,25 @@ export const RoomService = {
     if (error)
       throw new Error(`[startCleaning] ${error.message}`);
 
-    await supabase
-      .from("rooms")
-      .update({ status: "cleaning" })
-      .eq("id", data.room_id);
+    if (data?.room_id) {
+      await supabase
+        .from("rooms")
+        .update({ status: "cleaning" })
+        .eq("id", data.room_id);
+    }
 
     return data;
   },
 
-  // =========================================================
-  // 🧹 UPDATE CHECKLIST
-  // =========================================================
+  /* =========================================================
+    CHECKLIST
+  ========================================================= */
 
-  async updateChecklistItem(itemId: number, isDone: boolean, note?: string) {
+  async updateChecklistItem(
+    itemId: number,
+    isDone: boolean,
+    note?: string
+  ) {
     const { error } = await supabase
       .from("housekeeping_task_items")
       .update({
@@ -199,34 +310,29 @@ export const RoomService = {
       throw new Error(`[updateChecklistItem] ${error.message}`);
   },
 
-  // =========================================================
-  // 🟢 COMPLETE CLEANING (FIXED TIME CALC)
-  // =========================================================
+  /* =========================================================
+    COMPLETE CLEANING (stores END time + duration)
+  ========================================================= */
 
   async completeCleaning(taskId: number, note?: string) {
     const staffId = await this.getCurrentUserId();
     const now = new Date().toISOString();
 
-    const { data: task, error: fetchError } = await supabase
+    const { data: task, error } = await supabase
       .from("housekeeping_tasks")
       .select("id, room_id, started_at")
       .eq("id", taskId)
       .single();
 
-    if (fetchError)
-      throw new Error(`[completeCleaning-fetch] ${fetchError.message}`);
+    if (error)
+      throw new Error(`[completeCleaning] ${error.message}`);
 
-    if (!task.started_at) {
-      throw new Error("Task has no start time");
-    }
-
-    // 🔥 FIXED ACCURATE DURATION
-    const startTime = new Date(task.started_at).getTime();
-    const endTime = new Date(now).getTime();
+    const start = new Date(task.started_at).getTime();
+    const end = new Date(now).getTime();
 
     const durationMinutes = Math.max(
       1,
-      Math.round((endTime - startTime) / 60000)
+      Math.round((end - start) / 60000)
     );
 
     const { error: updateError } = await supabase
@@ -234,7 +340,7 @@ export const RoomService = {
       .update({
         status: "completed",
         note: note ?? null,
-        completed_at: now,
+        completed_at: now,          // ✅ CLEANING END TIME
         completed_by: staffId,
         duration_minutes: durationMinutes,
       })
@@ -243,22 +349,29 @@ export const RoomService = {
     if (updateError)
       throw new Error(`[completeCleaning-update] ${updateError.message}`);
 
-    await supabase
-      .from("rooms")
-      .update({ status: "available" })
-      .eq("id", task.room_id);
+    if (task.room_id) {
+      await supabase
+        .from("rooms")
+        .update({ status: "available" })
+        .eq("id", task.room_id);
+    }
 
     return true;
   },
 
-  // =========================================================
-  // 🏷 ROOM TYPES
-  // =========================================================
+  /* =========================================================
+    ROOM TYPES
+  ========================================================= */
 
   async getRoomTypes() {
     const { data, error } = await supabase
       .from("room_types")
-      .select(`*, room_amenities (amenities (id, name))`);
+      .select(`
+        *,
+        room_amenities (
+          amenities (id, name)
+        )
+      `);
 
     if (error)
       throw new Error(`[getRoomTypes] ${error.message}`);
@@ -266,9 +379,9 @@ export const RoomService = {
     return data ?? [];
   },
 
-  // =========================================================
-  // 🧂 AMENITIES
-  // =========================================================
+  /* =========================================================
+    AMENITIES
+  ========================================================= */
 
   async getAmenities() {
     const { data, error } = await supabase
@@ -282,9 +395,9 @@ export const RoomService = {
     return data ?? [];
   },
 
-  // =========================================================
-  // 📦 BOOKING HISTORY
-  // =========================================================
+  /* =========================================================
+    HISTORY
+  ========================================================= */
 
   async getRoomBookingHistory(roomId: number) {
     const { data, error } = await supabase
@@ -297,35 +410,5 @@ export const RoomService = {
       throw new Error(`[getRoomBookingHistory] ${error.message}`);
 
     return data ?? [];
-  },
-
-  // =========================================================
-  // 📋 TEMPLATE FUNCTIONS (UNCHANGED BUT SAFE)
-  // =========================================================
-
-  async getTemplateByRoomType(roomTypeId: number) {
-    const { data, error } = await supabase
-      .from("housekeeping_templates")
-      .select("*")
-      .eq("room_type_id", roomTypeId)
-      .maybeSingle();
-
-    if (error)
-      throw new Error(`[getTemplateByRoomType] ${error.message}`);
-
-    return data;
-  },
-
-  async createTemplate(roomTypeId: number) {
-    const { data, error } = await supabase
-      .from("housekeeping_templates")
-      .insert({ room_type_id: roomTypeId })
-      .select()
-      .single();
-
-    if (error)
-      throw new Error(`[createTemplate] ${error.message}`);
-
-    return data;
   },
 };

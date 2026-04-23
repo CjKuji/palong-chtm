@@ -3,7 +3,7 @@ import { BookingStatus } from "@/types/enums.types";
 import { BookingWithMeta } from "@/types/booking.types";
 
 /* =========================================================
-  BOOKING SERVICE (FINAL STABLE + SCHEMA SAFE)
+  BOOKING SERVICE (FINAL SNAPSHOT-SAFE VERSION)
 ========================================================= */
 
 export class BookingService {
@@ -58,12 +58,14 @@ export class BookingService {
         user_id,
         room_id,
         start_at,
+        end_at,
         guests,
         extra_beds,
         price_at_booking,
         total_amount,
         message,
         status,
+        payment_method,
         created_at,
         checked_in_at,
         checked_out_at,
@@ -79,19 +81,17 @@ export class BookingService {
           id,
           room_number,
           floor,
+          status,
           room_type_id,
 
           room_types (
             id,
             name,
+            description,
             capacity,
             base_price,
-
             room_amenities (
-              amenities (
-                id,
-                name
-              )
+              amenities (id, name)
             )
           )
         )
@@ -107,7 +107,7 @@ export class BookingService {
   }
 
   /* =========================================================
-    GET BY ID (🔥 FIXED ROOM FETCH)
+    GET BY ID
   ========================================================= */
   static async getById(id: number): Promise<BookingWithMeta> {
     this.debug("getById", id);
@@ -126,17 +126,17 @@ export class BookingService {
           id,
           room_number,
           floor,
+          status,
           room_type_id,
+
           room_types (
             id,
             name,
+            description,
             capacity,
             base_price,
             room_amenities (
-              amenities (
-                id,
-                name
-              )
+              amenities (id, name)
             )
           )
         )
@@ -193,7 +193,16 @@ export class BookingService {
           id,
           room_number,
           floor,
-          room_type_id
+          status,
+          room_type_id,
+
+          room_types (
+            id,
+            name,
+            description,
+            capacity,
+            base_price
+          )
         )
       `)
       .single();
@@ -203,9 +212,57 @@ export class BookingService {
       throw error;
     }
 
+    /* =========================================================
+      SAFE ARCHIVE FLOW (CRITICAL FIX)
+      ALWAYS REFRESH BEFORE ARCHIVING
+    ========================================================= */
     if (status === "checked_out") {
       await this.generateHousekeepingFromTemplate(data, actorId);
-      await this.archiveBooking(data);
+
+      const { data: freshBooking } = await supabase
+  .from("bookings")
+  .select(`
+    *,
+    payment_method,
+    start_at,
+    end_at,
+    guests,
+    message,
+    status,
+    total_amount,
+    extra_beds,
+    has_child,
+    has_pwd,
+    has_senior,
+    child_age_group,
+
+    checked_in_at,
+    checked_out_at,
+
+    users (id, fname, lname, email),
+
+    approved_by,
+    rejected_by,
+    checked_in_by,
+    checked_out_by,
+
+    rooms (
+      id,
+      room_number,
+      floor,
+      room_type_id,
+      room_types (
+        id,
+        name,
+        capacity,
+        base_price
+      )
+    )
+  `)
+  .eq("id", data.id)
+  .single();
+
+      await this.archiveBooking(freshBooking);
     }
 
     return this.mapBooking(data);
@@ -218,6 +275,8 @@ export class BookingService {
     booking: any,
     actorId?: string
   ) {
+    if (!booking?.room_id) return;
+
     const { data: room } = await supabase
       .from("rooms")
       .select("room_type_id")
@@ -270,43 +329,65 @@ export class BookingService {
   }
 
   /* =========================================================
-    ARCHIVE BOOKING
+    ARCHIVE BOOKING (FINAL SNAPSHOT SAFE)
   ========================================================= */
   private static async archiveBooking(booking: any) {
-    await supabase.from("archived_bookings").insert({
-      original_booking_id: booking.id,
-      user_id: booking.user_id,
-      room_id: booking.room_id,
+  if (!booking) return;
 
-      start_at: booking.start_at,
-      guests: booking.guests,
-      status: booking.status,
-      message: booking.message,
+  const room = booking?.rooms;
+  const roomType = room?.room_types;
 
-      checked_in_at: booking.checked_in_at,
-      checked_out_at: booking.checked_out_at,
+  const payload = {
+    original_booking_id: booking.id,
+    user_id: booking.user_id,
+    room_id: booking.room_id,
 
-      price_at_booking: booking.price_at_booking,
-      total_amount: booking.total_amount,
+    room_number: room?.room_number ?? null,
+    room_type_name: roomType?.name ?? null,
+    room_type_id: roomType?.id ?? null,
+    room_capacity: roomType?.capacity ?? null,
+    room_base_price: roomType?.base_price ?? null,
+    room_floor: room?.floor ?? null,
 
-      extra_beds: booking.extra_beds,
-      has_child: booking.has_child,
-      has_pwd: booking.has_pwd,
-      has_senior: booking.has_senior,
+    start_at: booking.start_at ?? null,
+    end_at: booking.end_at ?? null,
 
-      guest_fname: booking.users?.fname,
-      guest_lname: booking.users?.lname,
-      room_number: booking.rooms?.room_number,
+    checked_in_at: booking.checked_in_at ?? null,
+    checked_out_at: booking.checked_out_at ?? null,
 
-      approved_by: booking.approved_by,
-      rejected_by: booking.rejected_by,
-      checked_in_by: booking.checked_in_by,
-      checked_out_by: booking.checked_out_by,
-    });
+    guests: booking.guests ?? 0,
+    status: booking.status ?? "unknown",
+    message: booking.message ?? null,
+
+    payment_method: booking.payment_method ?? "unknown",
+
+    total_amount: booking.total_amount ?? 0,
+    extra_beds: booking.extra_beds ?? 0,
+
+    has_child: booking.has_child ?? false,
+    has_pwd: booking.has_pwd ?? false,
+    has_senior: booking.has_senior ?? false,
+    child_age_group: booking.child_age_group ?? null,
+
+    guest_fname: booking.users?.fname ?? null,
+    guest_lname: booking.users?.lname ?? null,
+
+    approved_by: booking.approved_by ?? null,
+    rejected_by: booking.rejected_by ?? null,
+    checked_in_by: booking.checked_in_by ?? null,
+    checked_out_by: booking.checked_out_by ?? null,
+  };
+
+  const { error } = await supabase
+    .from("archived_bookings")
+    .insert(payload);
+
+  if (error) {
+    console.error("[ARCHIVE ERROR]", error);
   }
-
+}
   /* =========================================================
-    MAPPER (🔥 FIXED ROOM SAFETY)
+    MAPPER (FINAL UI SAFE)
   ========================================================= */
   private static mapBooking(b: any): BookingWithMeta {
     const room = b?.rooms ?? null;
@@ -315,15 +396,22 @@ export class BookingService {
     return {
       ...b,
 
-      /* SAFE ROOM FIELDS */
-      room_number: room?.room_number ?? "Not assigned",
-      floor: room?.floor ?? "—",
-      room_type_name: roomType?.name ?? "Unknown type",
+      room: room
+        ? {
+            id: room.id,
+            room_number: room.room_number,
+            floor: room.floor,
+            status: room.status,
+            room_type: roomType,
+          }
+        : null,
 
-      /* AMENITIES */
+      users: b?.users ?? null,
+
+      room_type_name: roomType?.name ?? "Unknown Type",
+
       amenities: this.formatAmenities(roomType),
 
-      /* PRICING HELPERS */
       extra_bed_fee: this.getExtraBedFee(b?.extra_beds ?? 0),
       extra_bed_label: this.getExtraBedLabel(b?.extra_beds ?? 0),
     };
